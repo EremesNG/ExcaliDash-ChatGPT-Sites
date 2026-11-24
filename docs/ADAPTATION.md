@@ -95,12 +95,12 @@ de producto.
 
 ## Editor Excalidraw
 
-El editor se fija exactamente a `@excalidraw/excalidraw@0.18.0-4ce8305`, build de
-excalidraw.com del 27 de octubre de 2026, commit
-`4ce8305ca78e4ea05ad78c306292932bfe6b256f` de la rama `release`, canal npm `next`.
+El editor se fija exactamente a `@excalidraw/excalidraw@0.18.0-3c916c5`, build de
+excalidraw.com del 4 de noviembre de 2026, commit
+`3c916c58bd219157a3486960f865174468f86eff` de la rama `release`, canal npm `next`.
 Este pin es independiente del editor 0.18.1 de ExcaliDash 0.6.7. Incluye notas
 adhesivas, Bucket Fill y selección con lazo; React permanece en 18.3.1. El conversor
-Mermaid pasa a 3.0.0 como dependencia del editor.
+Mermaid pasa a 3.6.0 como dependencia del editor.
 
 Las tres rutas de miniaturas (importación, dashboard y guardado del editor) usan
 `exportScene({ type: "svg", data, config })` en lugar de `exportToSvg`. Conservan

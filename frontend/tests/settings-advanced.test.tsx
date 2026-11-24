@@ -20,15 +20,15 @@ vi.mock("../src/utils/importUtils", () => ({ importLegacyFiles: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-const BUILT_VERSION = "0.18.0-4ce8305";
-const PINNED_COMMIT = "4ce8305a1b2c3d4e5f60718293a4b5c6d7e8f901";
+const BUILT_VERSION = "0.18.0-3c916c5";
+const PINNED_COMMIT = "3c916c58bd219157a3486960f865174468f86eff";
 
 const pinned = {
   package: "@excalidraw/excalidraw",
   version: BUILT_VERSION,
   commit: PINNED_COMMIT,
-  shortCommit: "4ce8305",
-  releasedAt: "2026-10-27T10:20:30.000Z",
+  shortCommit: "3c916c5",
+  releasedAt: "2026-11-04T19:55:10Z",
 };
 const editorStatus = (
   patch: Partial<EditorStatus> = {},
@@ -36,12 +36,12 @@ const editorStatus = (
   data: {
     pinned,
     upstream: {
-      version: "0.18.0-4ce8305",
-      shortCommit: "4ce8305",
+      version: "0.18.0-3c916c5",
+      shortCommit: "3c916c5",
       releasedAt: pinned.releasedAt,
     },
     status: "match",
-    checkedAt: "2026-10-31T08:00:00.000Z",
+    checkedAt: "2026-11-07T08:00:00.000Z",
     sourceUrl: "https://excalidraw.com/version.json",
     ...patch,
   },
@@ -131,10 +131,10 @@ describe("Advanced settings — Excalidraw editor row", () => {
   it("keeps provider-less English text and UTC dates when utility callers use Spanish", async () => {
     setCurrentLocale("es");
     await openWith(editorStatus({
-      pinned: { ...pinned, releasedAt: "2026-10-27T00:30:00.000Z" },
+      pinned: { ...pinned, releasedAt: "2026-11-04T00:30:00.000Z" },
     }));
     expect(textOf(editorRow())).toContain("Same build as excalidraw.com");
-    expect(textOf(editorRow())).toContain("Oct 27, 2026");
+    expect(textOf(editorRow())).toContain("Nov 4, 2026");
   });
 
   it("is placed right after the Version row", async () => {
@@ -167,8 +167,8 @@ describe("Advanced settings — Excalidraw editor row", () => {
     await openWith(editorStatus({ status: "match" }));
     const text = textOf(editorRow());
     expect(text).toContain("Same build as excalidraw.com");
-    expect(text).toContain("release 4ce8305");
-    expect(text).toContain("Oct 27, 2026");
+    expect(text).toContain("release 3c916c5");
+    expect(text).toContain("Nov 4, 2026");
     expect(text).not.toContain("update available");
   });
 
@@ -179,14 +179,14 @@ describe("Advanced settings — Excalidraw editor row", () => {
         upstream: {
           version: "0.18.0-a1b2c3d",
           shortCommit: "a1b2c3d",
-          releasedAt: "2026-11-01T00:30:00.000Z",
+          releasedAt: "2026-11-05T00:30:00.000Z",
         },
       }),
     );
     const text = textOf(editorRow());
     expect(text).toContain("excalidraw.com runs a newer build");
     expect(text).toContain("a1b2c3d");
-    expect(text).toContain("Nov 1, 2026");
+    expect(text).toContain("Nov 5, 2026");
     expect(text).toContain("update available");
   });
 
@@ -197,14 +197,14 @@ describe("Advanced settings — Excalidraw editor row", () => {
         upstream: {
           version: "0.18.0-a1b2c3d",
           shortCommit: "a1b2c3d",
-          releasedAt: "2026-10-26T12:00:00.000Z",
+          releasedAt: "2026-11-03T12:00:00.000Z",
         },
       }),
     );
     const text = textOf(editorRow());
     expect(text).toContain("excalidraw.com runs a different build");
     expect(text).toContain("a1b2c3d");
-    expect(text).toContain("Oct 26, 2026");
+    expect(text).toContain("Nov 3, 2026");
     expect(text).not.toContain("update available");
   });
 
@@ -212,7 +212,7 @@ describe("Advanced settings — Excalidraw editor row", () => {
     await openWith(editorStatus({ status: "unavailable", upstream: null }));
     const text = textOf(editorRow());
     expect(text).toContain("Couldn't check excalidraw.com");
-    expect(text).toContain("pinned release 4ce8305");
+    expect(text).toContain("pinned release 3c916c5");
   });
 
   it("degrades to a plain message when the request itself fails", async () => {
@@ -234,8 +234,8 @@ describe("Advanced settings — Excalidraw editor row", () => {
     );
     expect(link.props.target).toBe("_blank");
     expect(link.props.rel).toBe("noopener noreferrer");
-    expect(link.props["aria-label"]).toBe("Commit 4ce8305 on GitHub (opens in a new tab)");
-    expect(textOf(link)).toBe("4ce8305");
+    expect(link.props["aria-label"]).toBe("Commit 3c916c5 on GitHub (opens in a new tab)");
+    expect(textOf(link)).toBe("3c916c5");
   });
 
   it("links the upstream commit by its short hash", async () => {
@@ -245,7 +245,7 @@ describe("Advanced settings — Excalidraw editor row", () => {
         upstream: {
           version: "0.18.0-a1b2c3d",
           shortCommit: "a1b2c3d",
-          releasedAt: "2026-11-01T00:30:00.000Z",
+          releasedAt: "2026-11-05T00:30:00.000Z",
         },
       }),
     );

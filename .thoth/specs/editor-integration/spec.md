@@ -8,20 +8,20 @@ Durable behavior for editor-integration.
 
 ### Requirement: Pinned editor build
 
-The frontend MUST depend on one exact published `@excalidraw/excalidraw` version whose package, commit and integrity are recorded in `upstream.json`, and the repository MUST fail its offline consistency check when the manifest, lockfile and provenance disagree.
+The frontend MUST depend on the exact published editor version `0.18.0-3c916c5`, with full commit, integrity and production provenance recorded in `upstream.json`; offline consistency validation MUST reject disagreement among the manifest, lockfile and provenance.
 
 #### Scenario: Pinned editor build
 
-- **GIVEN** `upstream.json` records editor version V
-- **WHEN** `frontend/package.json` or `frontend/package-lock.json` resolves a different version or a range
-- **THEN** `check:editor-upstream --offline` exits non-zero 
+- **GIVEN** the current production editor is `0.18.0-3c916c5`
+- **WHEN** the update is installed and built
+- **THEN** the exact version and matching full commit/integrity are recorded and the offline consistency check passes
 
 ### Requirement: Editor upstream drift status
 
-Authenticated users MUST be able to see, in Settings → Advanced, the built editor version and whether excalidraw.com currently serves the same build, a newer build, a different build, or could not be checked, without their browser contacting third-party hosts.
+Authenticated users MUST be able to see the built editor version and production drift status through Settings Advanced and the server-side comparison, preserving equal/newer/different/unavailable behavior for the updated pin without browser requests to third-party hosts.
 
 #### Scenario: Editor upstream drift status
 
-- **GIVEN** the pinned editor is `0.18.0-4ce8305`
+- **GIVEN** the pinned editor is `0.18.0-3c916c5`
 - **WHEN** excalidraw.com reports a later build with another hash
-- **THEN** `GET /api/system/editor` returns status `newer` and the Advanced row shows that an editor update is available 
+- **THEN** `/api/system/editor` returns `newer` and Advanced shows an update

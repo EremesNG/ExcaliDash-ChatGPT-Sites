@@ -25,8 +25,8 @@ importan ni restauran datos sobre cuentas de producción.
 ## Actualizar el editor Excalidraw
 
 El editor se actualiza por separado de ExcaliDash. El pin actual es
-`@excalidraw/excalidraw@0.18.0-4ce8305`, build de excalidraw.com del 27 de octubre de
-2026 (rama `release`, commit `4ce8305ca78e4ea05ad78c306292932bfe6b256f`, canal npm
+`@excalidraw/excalidraw@0.18.0-3c916c5`, build de excalidraw.com del 4 de noviembre de
+2026 (rama `release`, commit `3c916c58bd219157a3486960f865174468f86eff`, canal npm
 `next`). No se sigue un tag móvil ni se actualiza automáticamente.
 
 1. Consultar `https://excalidraw.com/version.json` o ejecutar desde la raíz:

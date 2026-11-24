@@ -83,10 +83,10 @@ const advancedProps = {
   setImportError: vi.fn(), setImportSuccess: vi.fn(),
 };
 const editorStatus = (patch: Partial<EditorStatus> = {}): EditorStatus => ({
-  pinned: { package: "@excalidraw/excalidraw", version: "0.18.0-4ce8305", commit: "4ce8305abcdef",
-    shortCommit: "4ce8305", releasedAt: "2026-10-27T00:30:00.000Z" },
-  upstream: { version: "0.18.0-a1b2c3d", shortCommit: "a1b2c3d", releasedAt: "2026-11-01T00:30:00.000Z" },
-  status: "match", checkedAt: "2026-11-01T08:00:00Z", sourceUrl: "https://excalidraw.com/version.json",
+  pinned: { package: "@excalidraw/excalidraw", version: "0.18.0-3c916c5", commit: "3c916c58bd219157a3486960f865174468f86eff",
+    shortCommit: "3c916c5", releasedAt: "2026-11-04T19:55:10Z" },
+  upstream: { version: "0.18.0-3c916c5", shortCommit: "3c916c5", releasedAt: "2026-11-04T19:55:10Z" },
+  status: "match", checkedAt: "2026-11-07T08:00:00Z", sourceUrl: "https://excalidraw.com/version.json",
   ...patch,
 });
 const openAdvanced = async () => {
@@ -107,12 +107,19 @@ describe("Advanced Settings in Spanish", () => {
   });
 
   it.each([
-    ["match", "Misma compilación que excalidraw.com", "27 oct 2026"],
-    ["newer", "excalidraw.com usa una compilación más reciente", "1 nov 2026"],
-    ["different", "excalidraw.com usa una compilación diferente", "1 nov 2026"],
+    ["match", "Misma compilación que excalidraw.com", "4 nov 2026"],
+    ["newer", "excalidraw.com usa una compilación más reciente", "5 nov 2026"],
+    ["different", "excalidraw.com usa una compilación diferente", "3 nov 2026"],
     ["unavailable", "No se pudo comprobar excalidraw.com · versión fijada", ""],
   ] as const)("translates the %s editor status and UTC release date", async (status, message, date) => {
-    state.editor.mockResolvedValue(editorStatus({ status, ...(status === "unavailable" ? { upstream: null } : {}) }));
+    state.editor.mockResolvedValue(editorStatus({
+      status,
+      ...(status === "unavailable" ? { upstream: null } : {}),
+      ...(status === "newer" || status === "different" ? {
+        upstream: { version: "0.18.0-a1b2c3d", shortCommit: "a1b2c3d",
+          releasedAt: status === "newer" ? "2026-11-05T00:30:00.000Z" : "2026-11-03T00:30:00.000Z" },
+      } : {}),
+    }));
     await openAdvanced();
     const region = renderer!.root.findByProps({ role: "status" });
     expect(textOf(region)).toContain(message);
