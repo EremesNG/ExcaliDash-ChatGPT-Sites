@@ -5,12 +5,35 @@ import {
 } from "../../utils/sync";
 export { getElementContentSig } from "../../utils/sync";
 
-export interface ElementVersionInfo {
-  version: number;
-  versionNonce: number;
-  updated: number;
-  contentSig: string;
-}
+export const getElementOrder = (elements: readonly any[]): string[] =>
+  elements
+    .map((element) => element?.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+export const getImageElementStatus = (
+  element: any,
+  files: Record<string, any>,
+) => {
+  if (
+    element?.type !== "image" ||
+    element.status === "saved" ||
+    typeof element.fileId !== "string"
+  ) {
+    return element?.status;
+  }
+  const dataURL = files[element.fileId]?.dataURL;
+  return typeof dataURL === "string" && dataURL.startsWith("data:image/")
+    ? "saved"
+    : element.status;
+};
+
+export const withSavedImageStatus = (
+  element: any,
+  files: Record<string, any>,
+) => {
+  const status = getImageElementStatus(element, files);
+  return status === element?.status ? element : { ...element, status };
+};
 
 /**
  * Matches CaptureUpdateAction.{NEVER,IMMEDIATELY} from @excalidraw/excalidraw.
@@ -234,6 +257,7 @@ export const getFilesDelta = (
   const delta: Record<string, any> = {};
   const prev = previous || {};
   const nxt = next || {};
+  if (prev === nxt) return delta;
 
   for (const fileId of Object.keys(nxt)) {
     const nextFile = nxt[fileId];
@@ -247,7 +271,10 @@ export const getFilesDelta = (
       continue;
     }
 
-    if (buildFileSignature(prevFile) !== buildFileSignature(nextFile)) {
+    if (
+      prevFile !== nextFile &&
+      buildFileSignature(prevFile) !== buildFileSignature(nextFile)
+    ) {
       delta[fileId] = nextFile;
     }
   }
@@ -391,3 +418,6 @@ export const getColorFromString = (str: string): string => {
   }
   return COLORS[Math.abs(hash) % COLORS.length];
 };
+
+// Bound imported geometry before computing a safe drop placement.
+export const MAX_SCENE_COORDINATE = 1e8;

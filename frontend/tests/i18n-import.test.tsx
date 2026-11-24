@@ -145,7 +145,7 @@ it("localizes export image failures with the failed file IDs and API validation 
   await expect(rehydrateFilesForExport({ imagen: file, foto: file }, "drawing"))
     .rejects.toThrow("No se pudieron incluir 2 imágenes del dibujo: imagen, foto");
   vi.spyOn(api, "get").mockResolvedValue({ data: null });
-  await expect(getDrawing("drawing")).rejects.toThrow("Datos de dibujo no válidos");
+  await expect(getDrawing("drawing")).rejects.toThrow("Respuesta inesperada al cargar el dibujo");
 });
 
 it("translates utility messages at call time after the provider language changes", async () => {

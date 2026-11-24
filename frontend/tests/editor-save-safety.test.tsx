@@ -16,7 +16,7 @@ vi.mock("react-router-dom", () => ({
 vi.mock("@excalidraw/excalidraw", () => ({ exportScene: vi.fn() }));
 vi.mock("../src/api", () => ({
   getDrawing: vi.fn(),
-  updateDrawing: vi.fn(),
+  saveDrawing: vi.fn(),
   isAxiosError: (error: any) => Boolean(error.response),
 }));
 vi.mock("../src/utils/imageCompression", () => ({
@@ -60,7 +60,8 @@ const makeHarness = (initial = [element("local")]) => {
     excalidrawAPI: ref<any>(editor),
     isSyncing: ref(false),
     isUnmounting: ref(false),
-    lastLocalChangeAt: ref(1),
+    localSceneRevision: ref(1),
+    savedSceneRevision: ref(0),
     lastPersistedElements: ref<readonly any[]>(initial),
     lastPersistedFiles: ref({}),
     lastSyncedFiles: ref({}),
@@ -104,6 +105,7 @@ const makeHarness = (initial = [element("local")]) => {
     setLive: (elements: any[]) => {
       live = elements;
       refs.latestElements.current = elements;
+      refs.localSceneRevision.current++;
     },
     get persistence() {
       return persistence;
@@ -113,7 +115,7 @@ const makeHarness = (initial = [element("local")]) => {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  vi.mocked(api.updateDrawing).mockResolvedValue({ version: 2 } as never);
+  vi.mocked(api.saveDrawing).mockResolvedValue({ version: 2 } as never);
 });
 afterEach(async () => {
   await act(async () => renderer?.unmount());
@@ -198,7 +200,7 @@ describe("serialized saves", () => {
     const h = makeHarness();
     await mount(h.Harness);
     const firstSave = deferred<any>();
-    vi.mocked(api.updateDrawing).mockReturnValueOnce(firstSave.promise);
+    vi.mocked(api.saveDrawing).mockReturnValueOnce(firstSave.promise);
     vi.mocked(api.getDrawing).mockResolvedValue({
       version: 2,
       elements: [element("peer")],
@@ -224,7 +226,7 @@ describe("serialized saves", () => {
       await first;
       await second;
     });
-    expect(api.updateDrawing).toHaveBeenLastCalledWith(
+    expect(api.saveDrawing).toHaveBeenLastCalledWith(
       "drawing",
       expect.objectContaining({
         elements: expect.arrayContaining([
@@ -254,7 +256,7 @@ describe("serialized saves", () => {
     });
     const a = sessions.get("drawing")!;
     const response = deferred<any>();
-    vi.mocked(api.updateDrawing).mockReturnValueOnce(response.promise);
+    vi.mocked(api.saveDrawing).mockReturnValueOnce(response.promise);
     const pending = a.persistence.enqueueSceneSave(
       "drawing",
       [element("local")],
@@ -285,12 +287,12 @@ describe("serialized saves", () => {
       await pending;
       await a.refs.saveQueue.current;
     });
-    expect(api.updateDrawing).toHaveBeenLastCalledWith(
+    expect(api.saveDrawing).toHaveBeenLastCalledWith(
       "drawing",
       expect.objectContaining({ elements: finalEdit, version: 2 }),
     );
     expect(
-      vi.mocked(api.updateDrawing).mock.calls.every(([id]) => id === "drawing"),
+      vi.mocked(api.saveDrawing).mock.calls.every(([id]) => id === "drawing"),
     ).toBe(true);
     expect(b.refs.currentDrawingVersion.current).toBe(10);
     expect(b.refs.lastPersistedElements.current).toEqual([
@@ -303,7 +305,7 @@ describe("serialized saves", () => {
     const h = makeHarness();
     await mount(h.Harness);
     const response = deferred<any>();
-    vi.mocked(api.updateDrawing).mockReturnValueOnce(response.promise);
+    vi.mocked(api.saveDrawing).mockReturnValueOnce(response.promise);
     const save = h.persistence.enqueueSceneSave(
       "drawing",
       [element("local")],

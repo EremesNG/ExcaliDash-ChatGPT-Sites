@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { Socket } from "socket.io-client";
+import { CaptureUpdateAction } from "@excalidraw/excalidraw";
 import { io } from "../../api/sitesSocket";
 import { toast } from "sonner";
 import { translate } from "../../i18n";
@@ -9,11 +10,15 @@ import {
   filesNeedRehydration,
   rehydrateFilesFromUrls,
 } from "../../utils/rehydrateFiles";
-import { buildRemoteSceneUpdate } from "./shared";
+import {
+  buildRemoteSceneUpdate,
+  getElementOrder,
+} from "./shared";
 import * as api from "../../api";
 import { reconcileElements } from "../../utils/sync";
 
-interface Peer extends UserIdentity {
+export interface Peer extends UserIdentity {
+  socketId: string;
   isActive: boolean;
 }
 
@@ -23,12 +28,37 @@ type UseEditorCollaborationInput = {
   isReady: boolean;
   excalidrawAPI: MutableRefObject<any>;
   lastSyncedFilesRef: MutableRefObject<Record<string, any>>;
-  lastSyncedElementOrderSigRef: MutableRefObject<string>;
+  lastSyncedElementOrderRef: MutableRefObject<readonly string[] | null>;
   latestElementsRef: MutableRefObject<readonly any[]>;
   latestFilesRef: MutableRefObject<any>;
-  computeElementOrderSig: (elements: readonly any[]) => string;
   recordElementVersion: (element: any) => void;
   onAccessDenied: () => void;
+  // Saved-scene broadcasts carry the committed drawing version.
+  currentDrawingVersionRef?: MutableRefObject<number | null>;
+  // Called when the server rejects edits but the drawing is still viewable.
+  onReadOnly?: () => void;
+  // Kept in step with persisted appState applied from saved-scene broadcasts,
+  // so the next local change is not mistaken for a background/grid edit.
+  latestAppStateRef?: MutableRefObject<any>;
+};
+
+// gridStep is persisted too, but the editor shows each user's own preference
+// for it (useEditorGridStep), so a peer's value is not applied.
+const PERSISTED_APP_STATE_KEYS = [
+  "viewBackgroundColor",
+  "gridSize",
+  "gridModeEnabled",
+] as const;
+
+const pickPersistedAppState = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return {};
+  const source = value as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const key of PERSISTED_APP_STATE_KEYS) {
+    if (key in source) picked[key] = source[key];
+  }
+  return picked;
 };
 
 const getSocketUrl = () =>
@@ -62,12 +92,14 @@ export const useEditorCollaboration = ({
   isReady,
   excalidrawAPI,
   lastSyncedFilesRef,
-  lastSyncedElementOrderSigRef,
+  lastSyncedElementOrderRef,
   latestElementsRef,
   latestFilesRef,
-  computeElementOrderSig,
   recordElementVersion,
   onAccessDenied,
+  currentDrawingVersionRef,
+  onReadOnly,
+  latestAppStateRef,
 }: UseEditorCollaborationInput) => {
   const [socketMe, setSocketMe] = useState<UserIdentity>(me);
   const socketMeRef = useRef<UserIdentity>(socketMe);
@@ -81,6 +113,8 @@ export const useEditorCollaboration = ({
   const pendingRemoteElementsRef = useRef<Map<string, any>>(new Map());
   const pendingRemoteFilesRef = useRef<Record<string, any>>({});
   const pendingRemoteElementOrderRef = useRef<string[] | null>(null);
+  const pendingRemoteVersionRef = useRef<number | null>(null);
+  const pendingRemoteAppStateRef = useRef<Record<string, unknown> | null>(null);
   const remoteFlushScheduledRef = useRef(false);
   const remoteFlushRafIdRef = useRef<number | null>(null);
   useEffect(() => {
@@ -95,6 +129,8 @@ export const useEditorCollaboration = ({
     if (!drawingId || !isReady) return;
     let cancelled = false;
     let catchupGeneration = 0;
+    let accessCheckPending = false;
+    let pendingFileFetches = 0;
     const fileReceipts = new Map<string, object>();
     const cursorUpdates = cursorBuffer.current;
     const socket = io(getSocketUrl(), {
@@ -136,29 +172,50 @@ export const useEditorCollaboration = ({
       animationFrameId.current = requestAnimationFrame(renderLoop);
     };
     renderLoop();
-    socket.on("presence-update", (users: Peer[]) => {
-      lastPresenceUsersRef.current = users;
-      const selfId = socketMeRef.current.id;
-      setPeers(users.filter((u) => u.id !== selfId));
-      if (excalidrawAPI.current) {
-        const collaborators = new Map<string, any>(
-          excalidrawAPI.current.getAppState().collaborators || [],
-        );
-        users.forEach((user) => {
-          if (!user.isActive && user.id !== selfId) {
-            collaborators.delete(user.id);
-          }
+    const isSelf = (user: Peer) =>
+      user.id === socketMeRef.current.id || (!!socket.id && user.socketId === socket.id);
+    const applyPresence = (users: Peer[]) => {
+      const api = excalidrawAPI.current;
+      if (!api) return;
+      // One header avatar per person, standing for an active tab if any.
+      const peersByUser = new Map<string, Peer>();
+      users.forEach((user) => {
+        if (isSelf(user)) return;
+        const known = peersByUser.get(user.id);
+        if (!known || (!known.isActive && user.isActive)) {
+          peersByUser.set(user.id, user);
+        }
+      });
+      setPeers([...peersByUser.values()]);
+      const collaborators = new Map<string, any>(
+        api.getAppState().collaborators || [],
+      );
+      // Seed collaborators before their first cursor move.
+      collaborators.forEach((_collaborator, userId) => {
+        if (!peersByUser.has(userId)) collaborators.delete(userId);
+      });
+      peersByUser.forEach((user, userId) => {
+        collaborators.set(userId, {
+          username: user.name,
+          color: { background: user.color, stroke: user.color },
+          id: userId,
+          ...collaborators.get(userId),
+          userState: user.isActive ? "active" : "away",
         });
-        const { sceneUpdate } = buildRemoteSceneUpdate({ collaborators });
-        if (sceneUpdate) {
-          isSyncing.current = true;
-          try {
-            excalidrawAPI.current.updateScene(sceneUpdate);
-          } finally {
-            isSyncing.current = false;
-          }
+      });
+      const { sceneUpdate } = buildRemoteSceneUpdate({ collaborators });
+      if (sceneUpdate) {
+        isSyncing.current = true;
+        try {
+          api.updateScene(sceneUpdate);
+        } finally {
+          isSyncing.current = false;
         }
       }
+    };
+    socket.on("presence-update", (users: Peer[]) => {
+      lastPresenceUsersRef.current = users;
+      applyPresence(users);
     });
     socket.on("error", (payload: any) => {
       const message =
@@ -168,9 +225,52 @@ export const useEditorCollaboration = ({
         onAccessDenied();
         return;
       }
+      if (message === "Read-only access: cannot edit this drawing") {
+        // Edit access was downgraded. Confirm the drawing is still readable
+        // before switching to read-only, instead of staying editable.
+        if (accessCheckPending) return;
+        accessCheckPending = true;
+        void api
+          .getDrawing(drawingId, { omitPreview: true })
+          .then((drawing) => {
+            if (cancelled) return;
+            if (drawing.accessLevel === "view") {
+              onReadOnly?.();
+              toast.info(translate("editor.save.nowReadOnly"));
+            }
+          })
+          .catch((error) => {
+            if (cancelled) return;
+            const status = api.isAxiosError(error)
+              ? error.response?.status
+              : undefined;
+            if (status === 403 || status === 404) onAccessDenied();
+          })
+          .finally(() => {
+            accessCheckPending = false;
+          });
+        return;
+      }
       if (message) toast.error(message);
     });
+    // The server revoked or downgraded this user's access while connected.
+    socket.on(
+      "access-changed",
+      (payload: { drawingId?: string; accessLevel?: string }) => {
+        if (cancelled || payload?.drawingId !== drawingId) return;
+        if (payload.accessLevel === "view") {
+          onReadOnly?.();
+          toast.info(translate("editor.save.nowReadOnly"));
+        } else if (payload.accessLevel === "none") {
+          // Lock the canvas at once; the access-denied route follows. The
+          // server's accompanying `error` event carries the user-facing toast.
+          onReadOnly?.();
+          onAccessDenied();
+        }
+      },
+    );
     socket.on("cursor-move", (data: any) => {
+      if (data.userId === socketMeRef.current.id) return;
       cursorBuffer.current.set(data.userId, {
         pointer: data.pointer,
         button: data.button || "up",
@@ -178,10 +278,57 @@ export const useEditorCollaboration = ({
         username: data.username,
         color: { background: data.color, stroke: data.color },
         id: data.userId,
+        userState: "active",
       });
     });
     const hasNonEmptyArray = (value: unknown): value is any[] =>
       Array.isArray(value) && value.length > 0;
+    // Advance only after the committed scene (and its fetched files) is merged,
+    // so the next save never claims a version whose content is not local yet.
+    const applyPersistedAppState = () => {
+      const next = pendingRemoteAppStateRef.current;
+      const editor = excalidrawAPI.current;
+      if (!next || !editor) return;
+      pendingRemoteAppStateRef.current = null;
+      const current = editor.getAppState?.() ?? {};
+      const changed = Object.fromEntries(
+        Object.entries(next).filter(([key, value]) => current[key] !== value),
+      );
+      if (Object.keys(changed).length > 0) {
+        isSyncing.current = true;
+        try {
+          editor.updateScene({
+            appState: changed,
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
+        } finally {
+          isSyncing.current = false;
+        }
+      }
+      if (latestAppStateRef?.current) {
+        latestAppStateRef.current = { ...latestAppStateRef.current, ...next };
+      }
+    };
+    const advanceVersion = () => {
+      if (pendingFileFetches > 0) return;
+      const remoteVersion = pendingRemoteVersionRef.current;
+      if (remoteVersion === null) {
+        applyPersistedAppState();
+        return;
+      }
+      pendingRemoteVersionRef.current = null;
+      const current = currentDrawingVersionRef?.current;
+      if (
+        currentDrawingVersionRef &&
+        typeof current === "number" &&
+        remoteVersion > current
+      ) {
+        applyPersistedAppState();
+        currentDrawingVersionRef.current = remoteVersion;
+      } else {
+        pendingRemoteAppStateRef.current = null;
+      }
+    };
     const flushRemoteUpdates = () => {
       remoteFlushScheduledRef.current = false;
       remoteFlushRafIdRef.current = null;
@@ -191,7 +338,10 @@ export const useEditorCollaboration = ({
         Object.keys(pendingRemoteFilesRef.current || {}).length > 0;
       const pendingOrderRaw = pendingRemoteElementOrderRef.current;
       const hasPendingOrder = hasNonEmptyArray(pendingOrderRaw);
-      if (!hasPendingElements && !hasPendingFiles && !hasPendingOrder) return;
+      if (!hasPendingElements && !hasPendingFiles && !hasPendingOrder) {
+        advanceVersion();
+        return;
+      }
       isSyncing.current = true;
       try {
         const pendingElements = Array.from(
@@ -220,8 +370,7 @@ export const useEditorCollaboration = ({
         }
         if (mergedElements) {
           if (elementOrder) {
-            lastSyncedElementOrderSigRef.current =
-              computeElementOrderSig(mergedElements);
+            lastSyncedElementOrderRef.current = getElementOrder(mergedElements);
           }
           const mergedById = new Map(mergedElements.map((el) => [el.id, el]));
           pendingElements.forEach((el: any) => {
@@ -250,6 +399,7 @@ export const useEditorCollaboration = ({
       } finally {
         isSyncing.current = false;
       }
+      advanceVersion();
       const moreElements = pendingRemoteElementsRef.current.size > 0;
       const moreFiles =
         Object.keys(pendingRemoteFilesRef.current || {}).length > 0;
@@ -336,7 +486,13 @@ export const useEditorCollaboration = ({
         if (Object.keys(reusableFiles).length > 0) stage(reusableFiles);
       }
       if (filesNeedRehydration(incomingFiles)) {
-        void rehydrateFilesFromUrls(incomingFiles).then(stage);
+        pendingFileFetches += 1;
+        void rehydrateFilesFromUrls(incomingFiles)
+          .then(stage)
+          .finally(() => {
+            pendingFileFetches -= 1;
+            scheduleRemoteFlush();
+          });
       } else {
         stage(incomingFiles);
       }
@@ -348,14 +504,36 @@ export const useEditorCollaboration = ({
         files,
         elementOrder,
         persisted,
+        version,
+        appState,
       }: {
         elements: any[];
         files?: Record<string, any>;
         elementOrder?: string[];
         persisted?: boolean;
+        version?: number;
+        appState?: Record<string, unknown>;
       }) => {
         stageElements(elements, persisted === true);
         stageFiles(files, persisted === true);
+        if (
+          persisted === true &&
+          typeof version === "number" &&
+          Number.isInteger(version)
+        ) {
+          const highestKnownVersion = Math.max(
+            currentDrawingVersionRef?.current ?? -1,
+            pendingRemoteVersionRef.current ?? -1,
+          );
+          if (version > highestKnownVersion) {
+            pendingRemoteVersionRef.current = version;
+            const persistedAppState = pickPersistedAppState(appState);
+            pendingRemoteAppStateRef.current =
+              Object.keys(persistedAppState).length > 0
+                ? persistedAppState
+                : null;
+          }
+        }
         if (
           !persisted &&
           Array.isArray(elementOrder) &&
@@ -372,8 +550,11 @@ export const useEditorCollaboration = ({
       try {
         // Joining after the initial load closes its subscription gap; joining
         // after reconnect recovers edits missed while the socket was offline.
-        const remote = await api.getDrawing(drawingId);
+        const remote = await api.getDrawing(drawingId, { omitPreview: true });
         if (cancelled || generation !== catchupGeneration) return;
+        if (remote.accessLevel === "view") {
+          onReadOnly?.();
+        }
         stageElements(remote.elements, true);
         // Socket packets received during the read already have newer file
         // receipts. A delayed HTTP snapshot must not replace their bytes.
@@ -414,9 +595,8 @@ export const useEditorCollaboration = ({
       };
       socketMeRef.current = next;
       setSocketMe(next);
-      const lastUsers = lastPresenceUsersRef.current;
-      if (lastUsers) {
-        setPeers(lastUsers.filter((u) => u.id !== next.id));
+      if (lastPresenceUsersRef.current) {
+        applyPresence(lastPresenceUsersRef.current);
       }
     });
     socket.on("drawing-server-update", (payload: { drawingId?: string }) => {
@@ -449,6 +629,7 @@ export const useEditorCollaboration = ({
       document.removeEventListener("mouseleave", onMouseLeave);
       socket.off("presence-update");
       socket.off("error");
+      socket.off("access-changed");
       socket.off("cursor-move");
       socket.off("element-update");
       socket.off("drawing-server-update");
@@ -461,6 +642,8 @@ export const useEditorCollaboration = ({
       pendingRemoteElements.clear();
       pendingRemoteFilesRef.current = {};
       pendingRemoteElementOrderRef.current = null;
+      pendingRemoteVersionRef.current = null;
+      pendingRemoteAppStateRef.current = null;
       cursorUpdates.clear();
       lastPresenceUsersRef.current = null;
       if (socketRef.current === socket) socketRef.current = null;
@@ -472,12 +655,14 @@ export const useEditorCollaboration = ({
     isReady,
     excalidrawAPI,
     lastSyncedFilesRef,
-    lastSyncedElementOrderSigRef,
+    lastSyncedElementOrderRef,
     latestElementsRef,
     latestFilesRef,
-    computeElementOrderSig,
     recordElementVersion,
     onAccessDenied,
+    currentDrawingVersionRef,
+    onReadOnly,
+    latestAppStateRef,
   ]);
 
   const onPointerUpdate = useCallback(
@@ -499,11 +684,5 @@ export const useEditorCollaboration = ({
     [drawingId],
   );
 
-  return {
-    peers,
-    socketMeRef,
-    socketRef,
-    isSyncing,
-    onPointerUpdate,
-  };
+  return { peers, socketMeRef, socketRef, isSyncing, onPointerUpdate };
 };

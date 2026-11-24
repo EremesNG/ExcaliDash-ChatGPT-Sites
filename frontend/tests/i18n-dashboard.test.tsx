@@ -27,6 +27,7 @@ vi.mock("../src/api", () => ({
   createDrawing: vi.fn(async (name: string) => ({ id: "created", name })),
   getDrawing: vi.fn(async () => { throw new Error("Scene service unavailable"); }),
   isS3Enabled: vi.fn(async () => false),
+  isAxiosError: () => false,
   getDrawingPreview: vi.fn(async () => { throw new Error("Preview service unavailable"); }),
 }));
 vi.mock("react-dom", () => ({ createPortal: (children: React.ReactNode) => children }));
@@ -128,7 +129,7 @@ describe("Spanish dashboard", () => {
   );
 
   it("interpolates the search as content in the empty state", async () => {
-    const root = await mount(<DrawingsGrid {...gridProps} search={'plano "A"'} />);
+    const root = await mount(<DrawingsGrid {...gridProps} emptySearch={'plano "A"'} />);
     expect(textOf(root)).toContain("No se han encontrado dibujos");
     expect(textOf(root)).toContain('No hay resultados para «plano "A"»');
     expect(textOf(root)).toContain("Borrar búsqueda");
@@ -165,7 +166,7 @@ describe("Spanish dashboard", () => {
 
   it.each([[1, "dibujo"], [2, "dibujos"]])("pluralizes the permanent deletion dialog for %i selected drawings", async (count, noun) => {
     vi.mocked(api.authStatus).mockResolvedValue({ authEnabled: false });
-    const drawings = Array.from({ length: count }, (_, index) => ({ ...drawing, id: `drawing-${index}` }));
+    const drawings = Array.from({ length: count }, (_, index) => ({ ...drawing, id: `drawing-${index}`, collectionId: "trash" }));
     vi.mocked(api.getDrawings).mockResolvedValue({ drawings, totalCount: count });
     const root = await mount(<Dashboard />, "es-ES", "/collections?id=trash");
     expect(root.findByProps({ title: "Abrir menú" }).props["aria-label"]).toBe("Abrir menú");
@@ -246,7 +247,7 @@ describe("Spanish dashboard", () => {
   });
 
   it("retains the English toolbar and search fallback", async () => {
-    const root = await mount(<><Toolbar /><DrawingsGrid {...gridProps} search="plan" /></>, "en");
+    const root = await mount(<><Toolbar /><DrawingsGrid {...gridProps} emptySearch="plan" /></>, "en");
     expect(textOf(root)).toContain("New Drawing");
     expect(textOf(root)).toContain('No results for "plan"');
   });

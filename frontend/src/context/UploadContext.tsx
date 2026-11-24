@@ -4,9 +4,9 @@ import React, {
   useContext,
   useState,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
-import { importDrawings } from "../utils/importUtils";
 import { uuidv4 } from "../utils/uuid";
 
 export type UploadStatus =
@@ -33,6 +33,17 @@ interface UploadContextType {
 }
 
 const UploadContext = createContext<UploadContextType | undefined>(undefined);
+const UploadFilesContext = createContext<
+  UploadContextType["uploadFiles"] | undefined
+>(undefined);
+
+// eslint-disable-next-line react-refresh/only-export-components -- Hook shares its context with the provider.
+export const useUploadFiles = () => {
+  const uploadFiles = useContext(UploadFilesContext);
+  if (!uploadFiles)
+    throw new Error("useUploadFiles must be used within an UploadProvider");
+  return uploadFiles;
+};
 
 export const useUpload = () => {
   const context = useContext(UploadContext);
@@ -119,6 +130,7 @@ export const UploadProvider: React.FC<{ children: ReactNode }> = ({
 
       try {
         if (supportedFiles.length === 0) return;
+        const { importDrawings } = await import("../utils/importUtils");
         await importDrawings(
           supportedFiles,
           targetCollectionId,
@@ -140,18 +152,27 @@ export const UploadProvider: React.FC<{ children: ReactNode }> = ({
     [updateTask],
   );
 
+  const value = useMemo(
+    () => ({
+      tasks,
+      uploadFiles,
+      clearCompleted,
+      clearSuccessful,
+      removeTask,
+      isUploading,
+    }),
+    [
+      tasks,
+      uploadFiles,
+      clearCompleted,
+      clearSuccessful,
+      removeTask,
+      isUploading,
+    ],
+  );
   return (
-    <UploadContext.Provider
-      value={{
-        tasks,
-        uploadFiles,
-        clearCompleted,
-        clearSuccessful,
-        removeTask,
-        isUploading,
-      }}
-    >
-      {children}
-    </UploadContext.Provider>
+    <UploadFilesContext.Provider value={uploadFiles}>
+      <UploadContext.Provider value={value}>{children}</UploadContext.Provider>
+    </UploadFilesContext.Provider>
   );
 };

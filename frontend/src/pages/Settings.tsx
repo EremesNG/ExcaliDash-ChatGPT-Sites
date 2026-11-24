@@ -26,7 +26,8 @@ export const Settings: React.FC = () => {
   const { t } = useLocale();
   const [collections, setCollections] = useState<Collection[]>([]);
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, themePreference, setThemePreference } = useTheme();
+  const [appendDroppedDrawings, setAppendDroppedDrawings] = usePreference("appendDroppedDrawings", false);
   const { authEnabled, user, authMode } = useAuth();
   const [editorAutoHide, setEditorAutoHide] = usePreference(
     "editorAutoHide",
@@ -78,6 +79,7 @@ export const Settings: React.FC = () => {
   }>({ isOpen: false, file: null, info: null });
   const [backupImportLoading, setBackupImportLoading] = useState(false);
   const [backupImportSuccess, setBackupImportSuccess] = useState(false);
+  const [backupExportError, setBackupExportError] = useState({ isOpen: false, message: "" });
   const [backupImportError, setBackupImportError] = useState<{
     isOpen: boolean;
     message: string;
@@ -197,7 +199,7 @@ export const Settings: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (err: unknown) {
       console.error("Backup export failed:", err);
-      setBackupImportError({
+      setBackupExportError({
         isOpen: true,
         message: await getApiErrorMessageAsync(err, t("settings.errors.export")),
       });
@@ -347,7 +349,10 @@ export const Settings: React.FC = () => {
           <SettingsMainGrid
             exportBackup={exportBackup}
             theme={theme}
-            toggleTheme={toggleTheme}
+            themePreference={themePreference}
+            onThemePreferenceChange={setThemePreference}
+            appendDroppedDrawings={appendDroppedDrawings}
+            onAppendDroppedDrawingsChange={setAppendDroppedDrawings}
             imageCompression={imageCompression}
             toggleImageCompression={toggleImageCompression}
             imageCompressionThresholdMb={imageCompressionThresholdMb}
@@ -404,6 +409,8 @@ export const Settings: React.FC = () => {
           setBackupImportConfirmation={setBackupImportConfirmation}
           backupImportSuccess={backupImportSuccess}
           setBackupImportSuccess={setBackupImportSuccess}
+          backupExportError={backupExportError}
+          closeBackupExportError={() => setBackupExportError({ isOpen: false, message: "" })}
           backupImportError={backupImportError}
           setBackupImportError={setBackupImportError}
           setBackupImportLoading={setBackupImportLoading}

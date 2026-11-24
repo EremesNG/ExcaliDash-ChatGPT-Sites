@@ -160,6 +160,7 @@ const modalProps: React.ComponentProps<typeof SettingsConfirmModals> = {
   authToggleConfirm: { isOpen: false, nextEnabled: null }, setAuthToggleConfirm: vi.fn(),
   authDisableFinalConfirmOpen: false, setAuthDisableFinalConfirmOpen: vi.fn(), setAuthEnabled: vi.fn(),
   backupImportConfirmation: { isOpen: false, file: null, info: null }, setBackupImportConfirmation: vi.fn(),
+  backupExportError: { isOpen: false, message: "" }, closeBackupExportError: vi.fn(),
   backupImportSuccess: false, setBackupImportSuccess: vi.fn(), backupImportError: { isOpen: false, message: "" },
   setBackupImportError: vi.fn(), setBackupImportLoading: vi.fn(),
 };
@@ -264,7 +265,7 @@ describe("Settings in Spanish", () => {
     expect(renderer!.root.findByProps({ "aria-label": "Idioma" }).props.value).toBe("es-ES");
     expect(textOf(renderer!.root)).toContain("Apariencia");
     expect(textOf(renderer!.root)).toContain("Comprimir imágenes de más de 0,5 MB");
-    expect(renderer!.root.findByProps({ "aria-label": "Activar el modo oscuro" })).toBeDefined();
+    expect(renderer!.root.findByProps({ "aria-label": "Tema" })).toBeDefined();
   });
 
   it("keeps an existing editor-only language understandable", async () => {

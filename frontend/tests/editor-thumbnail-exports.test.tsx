@@ -7,11 +7,16 @@ import { makeSvgPreview } from "../src/utils/importHelpers";
 import { useDrawingPreview } from "../src/components/drawing-card/useDrawingPreview";
 
 vi.mock("@excalidraw/excalidraw", () => ({
-  exportScene: vi.fn(async () => ({ outerHTML: '<svg data-preview="scene" />' })),
+  exportScene: vi.fn(async () => ({
+    outerHTML: '<svg data-preview="scene" />',
+    children: [], hasAttribute: () => true, getAttribute: () => null,
+    querySelectorAll: () => [],
+  })),
 }));
 vi.mock("../src/api", () => ({
   getDrawing: vi.fn(),
   getDrawingPreview: vi.fn(async () => null),
+  isAxiosError: () => false,
 }));
 
 const drawing = {
@@ -88,9 +93,8 @@ describe("dashboard thumbnails", () => {
         appState,
         files: { ...files, unused: { dataURL: "/api/files/deleted" } },
       });
-      const generated = vi.fn();
       function Harness() {
-        const { previewSvg } = useDrawingPreview(drawing, generated);
+        const { previewSvg } = useDrawingPreview(drawing);
         return <output>{previewSvg}</output>;
       }
       await act(async () => {
@@ -113,7 +117,6 @@ describe("dashboard thumbnails", () => {
       expect(renderer!.root.findByType("output").children).toEqual([
         '<svg data-preview="scene" />',
       ]);
-      expect(generated).toHaveBeenCalledWith("drawing", '<svg data-preview="scene" />');
     },
   );
 });

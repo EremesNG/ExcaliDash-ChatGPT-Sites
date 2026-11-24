@@ -1,13 +1,14 @@
+import { accountDrawingKey, assertAuthSession, getAuthSessionGeneration, getDrawingCacheUserId } from "../utils/authSession";
 import { translate } from "../i18n";
 import type { Drawing, DrawingSummary } from "../types";
 import { normalizePreviewSvg } from "../utils/previewSvg";
-import { api, isAxiosError } from "./client";
+import { API_URL, api, isAxiosError } from "./client";
 
 // Per-file image upload capability. The endpoint below is served by newer
 // backends only; against an older server the route 404s (or 501s). The first
 // such response flips this flag off for the rest of the session so callers stop
 // attempting per-file uploads and fall back to inlining bytes in the scene PUT
-// (which the server still interns) — a new frontend degrades to old behavior.
+// (which the server still interns) â€” a new frontend degrades to old behavior.
 let fileUploadSupported = true;
 
 export const isFileUploadSupported = (): boolean => fileUploadSupported;
@@ -20,7 +21,7 @@ export type UploadedFileRef = { url: string };
  * `fileId` is Excalidraw's content hash, so re-uploading is a no-op.
  *
  * Returns the ref URL to store in place of the inline dataURL, or `null` when
- * the backend does not support per-file uploads (404/501) — in which case the
+ * the backend does not support per-file uploads (404/501) â€” in which case the
  * capability is disabled for the session and the caller keeps the inline bytes.
  * Other errors (network, 413, 5xx) are thrown so the caller can retry.
  */
@@ -84,13 +85,7 @@ const deserializeDrawingSummary = (drawing: unknown): DrawingSummary => {
   if (typeof drawing !== "object" || drawing === null)
     throw new Error(translate("importExport.api.invalidDrawing"));
   const parsed = drawing as HasTimestamps & DrawingSummary;
-  return deserializeTimestamps({
-    ...parsed,
-    preview:
-      typeof parsed.preview === "string"
-        ? normalizePreviewSvg(parsed.preview)
-        : parsed.preview,
-  });
+  return deserializeTimestamps(parsed);
 };
 
 const deserializeDrawing = (drawing: unknown): Drawing => {
@@ -193,20 +188,82 @@ export async function getSharedDrawings(
   };
 }
 
-export const getDrawing = async (id: string) => {
-  const response = await api.get<Drawing>(`/drawings/${id}`);
-  return deserializeDrawing(response.data);
+type DrawingWithPreviewFlag = Drawing & { hasPreview?: boolean };
+const drawingValidators = new Map<string, { etag: string; drawing: DrawingWithPreviewFlag }>();
+export const clearDrawingValidators = () => drawingValidators.clear();
+
+export const getDrawing = async (
+  id: string,
+  options?: { omitPreview?: boolean; signal?: AbortSignal },
+) => {
+  // The editor only needs to know whether a thumbnail exists; skipping it can
+  // remove most of the response for image-heavy drawings.
+  const started = getAuthSessionGeneration();
+  const key = accountDrawingKey(`${id}:${options?.omitPreview ? "compact" : "full"}`);
+  const cached = drawingValidators.get(key);
+  const response = await api.get<DrawingWithPreviewFlag>(
+    `/drawings/${id}`,
+    {
+      params: options?.omitPreview ? { omitPreview: 1 } : undefined,
+      signal: options?.signal,
+      adapter: "fetch",
+      fetchOptions: { cache: "no-store" },
+      headers: cached ? { "If-None-Match": cached.etag } : undefined,
+      validateStatus: (status) => status === 200 || (status === 304 && !!cached),
+    },
+  );
+  assertAuthSession(started);
+  options?.signal?.throwIfAborted();
+  if (response.status === 304 && cached) return structuredClone(cached.drawing);
+  // A proxy or auth gateway can answer 200 with an HTML page or a different
+  // shape. Opening that as an empty, editable canvas would let an autosave
+  // overwrite the real drawing.
+  const data: unknown = response.data;
+  const drawing =
+    typeof data === "object" && data !== null
+      ? (data as Record<string, unknown>)
+      : null;
+  if (
+    !drawing ||
+    drawing.id !== id ||
+    !Array.isArray(drawing.elements) ||
+    typeof drawing.version !== "number" ||
+    !Number.isInteger(drawing.version) ||
+    (drawing.accessLevel !== "view" &&
+      drawing.accessLevel !== "edit" &&
+      drawing.accessLevel !== "owner")
+  ) {
+    throw new Error(translate("editor.load.invalidResponse"));
+  }
+  const parsed: DrawingWithPreviewFlag = deserializeDrawing(drawing);
+  const etag = response.headers?.etag;
+  drawingValidators.delete(key);
+  if (getDrawingCacheUserId() && typeof etag === "string") {
+    drawingValidators.set(key, { etag, drawing: structuredClone(parsed) });
+    if (drawingValidators.size > 8) {
+      const oldest = drawingValidators.keys().next().value;
+      if (oldest !== undefined) drawingValidators.delete(oldest);
+    }
+  }
+  return parsed;
 };
 
 // Previews are no longer inlined into list responses; fetch them per-drawing.
 // The endpoint is ETag-cacheable (revalidates on updatedAt), so repeated calls
 // are cheap once the browser has a copy.
-export const getDrawingPreview = async (id: string): Promise<string | null> => {
+export const getDrawingPreview = async (
+  id: string,
+  signal?: AbortSignal,
+): Promise<string | null> => {
+  const started = getAuthSessionGeneration();
   const response = await api.get<{ preview: string | null }>(
     `/drawings/${id}/preview`,
+    { signal, adapter: "fetch", fetchOptions: { cache: "no-store" } },
   );
+  assertAuthSession(started);
+  signal?.throwIfAborted();
   const preview = response.data?.preview;
-  return typeof preview === "string" ? normalizePreviewSvg(preview) : null;
+  return typeof preview === "string" ? preview : null;
 };
 
 export type ShareResolvedUser = { id: string; name: string; email: string };
@@ -331,8 +388,130 @@ export const updateDrawing = async (id: string, data: Partial<Drawing>) => {
   return deserializeDrawing(response.data);
 };
 
-export const deleteDrawing = async (id: string) => {
-  const response = await api.delete<{ success: true }>(`/drawings/${id}`);
+export type DrawingSaveResult = {
+  id: string;
+  version: number;
+  updatedAt: number;
+};
+
+// Scene JSON compresses ~10x. Large saves are gzipped so autosave on a slow
+// uplink sends hundreds of KB instead of megabytes; Express inflates
+// `Content-Encoding: gzip` bodies natively (BODY_LIMIT_MB applies inflated).
+const GZIP_MIN_BYTES = 64 * 1024;
+let gzipRequestsUnsupported = false;
+
+const gzipJson = async (json: string): Promise<Blob | null> => {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const stream = new Blob([json])
+      .stream()
+      .pipeThrough(new CompressionStream("gzip"));
+    return await new Response(stream).blob();
+  } catch {
+    return null;
+  }
+};
+
+// A save response must describe the drawing just written. A proxy or auth
+// gateway can answer 200 with an HTML page; treating that as success would
+// mark unsaved edits as persisted.
+const parseSaveResult = (id: string, data: unknown): DrawingSaveResult => {
+  const result =
+    typeof data === "object" && data !== null
+      ? (data as Record<string, unknown>)
+      : null;
+  const updatedAt =
+    typeof result?.updatedAt === "number" ? result.updatedAt :
+      typeof result?.updatedAt === "string" ? Date.parse(result.updatedAt) : NaN;
+  if (
+    !result ||
+    typeof result.id !== "string" ||
+    result.id.length === 0 ||
+    result.id !== id ||
+    typeof result.version !== "number" ||
+    !Number.isInteger(result.version) ||
+    !Number.isFinite(updatedAt)
+  ) {
+    throw new Error(translate("editor.save.invalidResponse"));
+  }
+  return { ...result, id, version: result.version, updatedAt };
+};
+
+// A cross-origin backend older than these headers rejects them in the CORS
+// preflight. After one plain JSON save succeeds, keep using plain saves.
+let legacySaveRequests = false;
+
+const isCrossOriginApi = (): boolean => {
+  try {
+    return (
+      new URL(API_URL, window.location.href).origin !== window.location.origin
+    );
+  } catch {
+    return false;
+  }
+};
+
+/** Save a scene and request only the resulting metadata. */
+export const saveDrawing = async (
+  id: string,
+  data: Partial<Drawing> & { expectedVersion?: number },
+  options?: { socketId?: string | null },
+): Promise<DrawingSaveResult> => {
+  const started = getAuthSessionGeneration();
+  const json = JSON.stringify(data);
+  const put = async (body: Blob | string, headers: Record<string, string> = {}) => {
+    assertAuthSession(started);
+    const response = await api.put<unknown>(`/drawings/${id}`, body, {
+      headers: { "Content-Type": "application/json", ...headers },
+    });
+    assertAuthSession(started);
+    return response;
+  };
+  if (legacySaveRequests) return parseSaveResult(id, (await put(json)).data);
+
+  const headers: Record<string, string> = {
+    Prefer: "return=minimal",
+    ...(options?.socketId ? { "X-Socket-Id": options.socketId } : {}),
+  };
+  const gzipped =
+    !gzipRequestsUnsupported && json.length >= GZIP_MIN_BYTES
+      ? await gzipJson(json)
+      : null;
+  const putPreferred = async () => {
+    if (!gzipped) return put(json, headers);
+    try {
+      return await put(gzipped, { ...headers, "Content-Encoding": "gzip" });
+    } catch (err) {
+      // 415: encoding unsupported. 400: a proxy may strip Content-Encoding
+      // while forwarding the compressed bytes. 413 stays a size error.
+      const status = isAxiosError(err) ? err.response?.status : undefined;
+      if (status !== 400 && status !== 415) throw err;
+      const response = await put(json, headers);
+      gzipRequestsUnsupported = true;
+      return response;
+    }
+  };
+
+  let response;
+  try {
+    response = await putPreferred();
+  } catch (err) {
+    if (!isAxiosError(err) || err.response || !isCrossOriginApi()) throw err;
+    response = await put(json);
+    legacySaveRequests = true;
+  }
+  return parseSaveResult(id, response.data);
+};
+
+// `requireTrashed` makes the server refuse (409) a drawing that is no longer
+// in Trash, e.g. because another tab restored it.
+export const deleteDrawing = async (
+  id: string,
+  options?: { requireTrashed?: boolean },
+) => {
+  const response = await api.delete<{ success: true }>(`/drawings/${id}`, {
+    params: options?.requireTrashed ? { requireTrashed: 1 } : undefined,
+  });
   return response.data;
 };
 
@@ -357,7 +536,11 @@ export type DrawingSnapshotFull = DrawingSnapshotSummary & {
 export const getDrawingHistory = async (
   drawingId: string,
   options?: { limit?: number; offset?: number },
-): Promise<{ snapshots: DrawingSnapshotSummary[]; totalCount: number }> => {
+): Promise<{
+  snapshots: DrawingSnapshotSummary[];
+  totalCount: number;
+  retentionDays?: number | null;
+}> => {
   const params: Record<string, number> = {};
   if (options?.limit) params.limit = options.limit;
   if (options?.offset) params.offset = options.offset;

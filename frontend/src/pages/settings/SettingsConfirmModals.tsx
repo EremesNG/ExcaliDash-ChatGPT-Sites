@@ -54,6 +54,8 @@ type SettingsConfirmModalsProps = {
   >;
   backupImportSuccess: boolean;
   setBackupImportSuccess: React.Dispatch<React.SetStateAction<boolean>>;
+  backupExportError: DialogState;
+  closeBackupExportError: () => void;
   backupImportError: DialogState;
   setBackupImportError: React.Dispatch<React.SetStateAction<DialogState>>;
   setBackupImportLoading: React.Dispatch<React.SetStateAction<boolean>>;
@@ -75,6 +77,8 @@ export const SettingsConfirmModals = ({
   setBackupImportConfirmation,
   backupImportSuccess,
   setBackupImportSuccess,
+  backupExportError,
+  closeBackupExportError,
   backupImportError,
   setBackupImportError,
   setBackupImportLoading,
@@ -285,6 +289,16 @@ export const SettingsConfirmModals = ({
         variant="success"
         onConfirm={() => setBackupImportSuccess(false)}
         onCancel={() => setBackupImportSuccess(false)}
+      />
+      <ConfirmModal
+        isOpen={backupExportError.isOpen}
+        title={t("settings.backup.exportFailedTitle")}
+        message={backupExportError.message}
+        confirmText={t("settings.actions.ok")}
+        showCancel={false}
+        isDangerous={false}
+        onConfirm={closeBackupExportError}
+        onCancel={closeBackupExportError}
       />
       <ConfirmModal
         isOpen={backupImportError.isOpen}

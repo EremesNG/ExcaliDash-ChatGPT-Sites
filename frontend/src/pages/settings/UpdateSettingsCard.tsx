@@ -75,6 +75,8 @@ export const UpdateSettingsCard = ({
     >
       <PlayfulSelect
         ariaLabel={t("settings.updates.channel")}
+        portal
+        align="right"
         value={updateChannel}
         onChange={(value) =>
           onChannelChange(value === "prerelease" ? "prerelease" : "stable")

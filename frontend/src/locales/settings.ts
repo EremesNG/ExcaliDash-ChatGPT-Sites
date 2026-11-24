@@ -1,5 +1,13 @@
 // Flat settings.* keys; en is the schema, es is complete, zhCN is a partial overlay.
 export const en = {
+  "settings.appearance.followingSystem": "Following your system ({theme})",
+  "settings.appearance.theme": "Theme",
+  "settings.appearance.light": "Light",
+  "settings.appearance.dark": "Dark",
+  "settings.appearance.system": "System",
+  "settings.drop.append": "Append dropped drawings",
+  "settings.drop.description": "Add to the open drawing instead of replacing it.",
+  "settings.drop.toggle": "Toggle appending dropped drawings",
   "settings.language": "Language",
   "settings.language.editor": "{language} (editor language)",
   "settings.title": "Settings",
@@ -112,6 +120,7 @@ export const en = {
   "settings.backup.confirmDescription": "This will merge the backup into your account.",
   "settings.backup.successTitle": "Backup Imported",
   "settings.backup.successDescription": "Backup imported successfully.",
+  "settings.backup.exportFailedTitle": "Backup Export Failed",
   "settings.backup.failedTitle": "Backup Import Failed",
   "settings.profile.title": "Profile",
   "settings.profile.emptyName": "Name cannot be empty",
@@ -124,6 +133,14 @@ export const en = {
 };
 
 export const es: Record<keyof typeof en, string> = {
+  "settings.appearance.followingSystem": "Según tu sistema (modo {theme})",
+  "settings.appearance.theme": "Tema",
+  "settings.appearance.light": "Claro",
+  "settings.appearance.dark": "Oscuro",
+  "settings.appearance.system": "Sistema",
+  "settings.drop.append": "Añadir dibujos arrastrados",
+  "settings.drop.description": "Añade el contenido al dibujo abierto en lugar de reemplazarlo.",
+  "settings.drop.toggle": "Activar o desactivar la adición de dibujos arrastrados",
   "settings.language": "Idioma",
   "settings.language.editor": "{language} (idioma del editor)",
   "settings.title": "Ajustes",
@@ -236,6 +253,7 @@ export const es: Record<keyof typeof en, string> = {
   "settings.backup.confirmDescription": "Esto combinará la copia de seguridad con tu cuenta.",
   "settings.backup.successTitle": "Copia de seguridad importada",
   "settings.backup.successDescription": "Copia de seguridad importada correctamente.",
+  "settings.backup.exportFailedTitle": "Error al exportar la copia de seguridad",
   "settings.backup.failedTitle": "Error al importar la copia de seguridad",
   "settings.profile.title": "Perfil",
   "settings.profile.emptyName": "El nombre no puede estar vacío",

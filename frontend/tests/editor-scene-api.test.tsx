@@ -34,7 +34,7 @@ const mountSceneApi = async () => {
     latestElementsRef: ref([{ id: "image", type: "image", fileId: "photo" }]),
     latestAppStateRef: ref({ viewBackgroundColor: "#ffffff" }),
     debouncedSaveRef: ref(vi.fn()),
-    hasSceneChangesSinceLoadRef: ref(false),
+    markSceneChanged: vi.fn(),
     uploadedRefs: ref({}),
     scanFileUploads: vi.fn(),
     setIsReady: vi.fn(),

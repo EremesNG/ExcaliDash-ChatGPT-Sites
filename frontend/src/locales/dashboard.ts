@@ -1,6 +1,11 @@
 // Flat dashboard.* keys (legacy sidebar.* retained); en is the schema,
 // es is complete, zhCN is a partial English-fallback overlay.
 export const en = {
+  "dashboard.toolbar.selection": "Selection",
+  "dashboard.toolbar.searchLabel": "Search drawings",
+  "dashboard.toolbar.selected": "{count} selected",
+  "dashboard.toolbar.importShort": "Import",
+  "dashboard.actions.restoredElsewhere": "A drawing was restored from Trash elsewhere and was not deleted",
   "dashboard.shell.beta": "Beta",
   "dashboard.shell.openMenu": "Open menu",
   "dashboard.shell.closeMenu": "Close menu",
@@ -13,6 +18,7 @@ export const en = {
   "dashboard.collection.label": "Collection",
   "dashboard.card.select": "Select {name}",
   "dashboard.card.deselect": "Deselect {name}",
+  "dashboard.card.open": "Open {name}",
   "dashboard.card.drawingName": "Drawing name",
   "dashboard.card.rename": "Rename",
   "dashboard.card.moveTo": "Move to...",
@@ -87,6 +93,11 @@ export const en = {
 };
 
 export const es: Record<keyof typeof en, string> = {
+  "dashboard.toolbar.selection": "Selección",
+  "dashboard.toolbar.searchLabel": "Buscar dibujos",
+  "dashboard.toolbar.selected": "Selección: {count}",
+  "dashboard.toolbar.importShort": "Importar",
+  "dashboard.actions.restoredElsewhere": "Se restauró un dibujo de la papelera en otra sesión y no se eliminó",
   "dashboard.shell.beta": "Beta",
   "dashboard.shell.openMenu": "Abrir menú",
   "dashboard.shell.closeMenu": "Cerrar menú",
@@ -99,6 +110,7 @@ export const es: Record<keyof typeof en, string> = {
   "dashboard.collection.label": "Colección",
   "dashboard.card.select": "Seleccionar {name}",
   "dashboard.card.deselect": "Deseleccionar {name}",
+  "dashboard.card.open": "Abrir {name}",
   "dashboard.card.drawingName": "Nombre del dibujo",
   "dashboard.card.rename": "Cambiar nombre",
   "dashboard.card.moveTo": "Mover a...",

@@ -27,9 +27,10 @@ export const HistoryPanel: React.FC<Props> = ({
   onRestoreSnapshot,
   onPreview,
 }) => {
-  const { locale, t } = useLocale();
+  const { locale, t, plural } = useLocale();
   const [snapshots, setSnapshots] = useState<api.DrawingSnapshotSummary[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [retentionDays, setRetentionDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewData, setPreviewData] =
@@ -54,6 +55,9 @@ export const HistoryPanel: React.FC<Props> = ({
       const data = await api.getDrawingHistory(drawingId, { limit: 100 });
       setSnapshots(data.snapshots);
       setTotalCount(data.totalCount);
+      setRetentionDays(
+        typeof data.retentionDays === "number" ? data.retentionDays : null,
+      );
     } catch {
       // ignore
     } finally {
@@ -283,7 +287,7 @@ export const HistoryPanel: React.FC<Props> = ({
         {/* Footer */}
         <div className="border-t-2 border-slate-100 px-4 py-3 dark:border-neutral-800">
           <p className="text-center text-xs font-semibold text-slate-400 dark:text-neutral-500">
-            {t("editor.history.retention")}
+            {retentionDays === null ? t("editor.history.retention") : plural("editor.history.retentionDays", retentionDays, { count: formatNumber(retentionDays, locale) })}
           </p>
         </div>
       </div>

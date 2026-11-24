@@ -16,15 +16,13 @@ import {
 import clsx from "clsx";
 import { Toaster } from "sonner";
 import { LanguageSelector } from "../../components/LanguageSelector";
+import { InlineEditInput } from "../../components/InlineEditInput";
 import { GridStepSelector } from "../../components/GridStepSelector";
 import { ShareModal } from "../../components/ShareModal";
 import { UserAvatar as ProfileAvatar } from "../../components/UserAvatar";
 import type { UserIdentity } from "../../utils/identity";
 import { UIOptions, validateEmbeddableUrl } from "./shared";
-
-interface Peer extends UserIdentity {
-  isActive: boolean;
-}
+import type { Peer } from "./useEditorCollaboration";
 
 type EditorViewProps = {
   id?: string;
@@ -50,6 +48,7 @@ type EditorViewProps = {
   peers: Peer[];
   theme: string;
   onBackClick: () => void;
+  onBackIntent: () => void;
   onCanvasChange: (
     elements: readonly any[],
     appState: any,
@@ -61,9 +60,9 @@ type EditorViewProps = {
   onNavigateHome: () => void;
   onNewNameChange: (value: string) => void;
   onPointerUpdate: (payload: any) => void;
-  onRenameBlur: () => void;
+  onRenameCancel: () => void;
   onRenameStart: () => void;
-  onRenameSubmit: (event: React.FormEvent) => void;
+  onRenameSubmit: () => void;
   onSetExcalidrawAPI: (api: any) => void;
   onSetLangCode: (langCode: string) => void;
   gridStep: number;
@@ -80,12 +79,12 @@ const CollaboratorAvatar = ({
   user,
   label,
   inactive = false,
-}: {
+ }: {
   user: UserIdentity;
   label: string;
   inactive?: boolean;
-}) => (
-  <div className="relative group" data-testid="collaborator-avatar">
+}) => {
+  const avatar = (
     <ProfileAvatar
       name={user.name}
       size="toolbar"
@@ -94,11 +93,16 @@ const CollaboratorAvatar = ({
         inactive && "opacity-30 grayscale",
       )}
     />
-    <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">
-      {label}
+  );
+  return (
+    <div className="relative group" data-testid="collaborator-avatar">
+      {avatar}
+      <div className="pointer-events-none absolute right-0 top-full z-50 mt-2 whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">
+        {label}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const EditorView: React.FC<EditorViewProps> = ({
   id,
@@ -124,6 +128,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   peers,
   theme,
   onBackClick,
+  onBackIntent,
   onCanvasChange,
   onCanvasDropCapture,
   onExportClick,
@@ -131,7 +136,7 @@ export const EditorView: React.FC<EditorViewProps> = ({
   onNavigateHome,
   onNewNameChange,
   onPointerUpdate,
-  onRenameBlur,
+  onRenameCancel,
   onRenameStart,
   onRenameSubmit,
   onSetExcalidrawAPI,
@@ -167,6 +172,8 @@ export const EditorView: React.FC<EditorViewProps> = ({
         <button
           onClick={onBackClick}
           aria-label={t("editor.chrome.back")}
+          onPointerEnter={onBackIntent}
+          onFocus={onBackIntent}
           disabled={isSavingOnLeave}
           className={`flex items-center gap-2 p-2 hover:bg-gray-100 dark:hover:bg-neutral-800 rounded-full text-gray-600 dark:text-gray-300 disabled:opacity-50 disabled:cursor-wait transition-all duration-200 ${isSavingOnLeave ? "pr-4" : ""}`}
         >
@@ -180,17 +187,15 @@ export const EditorView: React.FC<EditorViewProps> = ({
           )}
         </button>
         {isRenaming ? (
-          <form onSubmit={onRenameSubmit}>
-            <input
-              autoFocus
-              type="text"
-              value={newName}
-              onChange={(e) => onNewNameChange(e.target.value)}
-              onBlur={onRenameBlur}
-              className="font-medium text-gray-900 dark:text-white bg-transparent px-2 py-1 border-2 border-indigo-500 rounded-md outline-none min-w-[200px]"
-              style={{ width: `${Math.max(200, newName.length * 9 + 20)}px` }}
-            />
-          </form>
+          <InlineEditInput
+            aria-label={t("dashboard.card.drawingName")}
+            value={newName}
+            onChange={(e) => onNewNameChange(e.target.value)}
+            onCommit={onRenameSubmit}
+            onCancel={onRenameCancel}
+            className="font-medium text-gray-900 dark:text-white bg-transparent px-2 py-1 border-2 border-indigo-500 rounded-md outline-none min-w-[200px]"
+            style={{ width: `${Math.max(200, newName.length * 9 + 20)}px` }}
+          />
         ) : (
           <h1
             className="font-medium text-gray-900 dark:text-white px-2 py-1 hover:bg-gray-100 dark:hover:bg-neutral-800 rounded cursor-text"

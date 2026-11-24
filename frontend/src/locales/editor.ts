@@ -1,5 +1,18 @@
 // Flat editor.* keys; en is the schema, es is complete, zhCN is a partial overlay.
 export const en = {
+  "editor.drop.unsupported": "Skipped unsupported file: {name}",
+  "editor.drop.tooLarge": "Skipped {name}: drop size limit exceeded",
+  "editor.drop.fileFailed": "Could not import {name}",
+  "editor.load.retry": "Retry",
+  "editor.load.invalidResponse": "Unexpected response while loading drawing",
+  "editor.load.chunkFailed": "Unable to load the editor",
+  "editor.load.opening": "Opening drawing",
+  "editor.save.invalidResponse": "Unexpected response while saving drawing",
+  "editor.save.nowReadOnly": "Your access changed to view only.",
+  "editor.save.deleted": "This drawing no longer exists. Changes can't be saved.",
+  "editor.save.accessLost": "You no longer have access to this drawing.",
+  "editor.history.retentionDays.one": "Versions are kept for {count} day",
+  "editor.history.retentionDays.other": "Versions are kept for {count} days",
   "editor.chrome.title": "Drawing Editor",
   "editor.chrome.back": "Back",
   "editor.chrome.saving": "Saving changes...",
@@ -65,6 +78,19 @@ export const en = {
 };
 
 export const es: Record<keyof typeof en, string> = {
+  "editor.drop.unsupported": "Se omitió un archivo no compatible: {name}",
+  "editor.drop.tooLarge": "Se omitió {name}: supera el límite al arrastrar archivos",
+  "editor.drop.fileFailed": "No se pudo importar {name}",
+  "editor.load.retry": "Reintentar",
+  "editor.load.invalidResponse": "Respuesta inesperada al cargar el dibujo",
+  "editor.load.chunkFailed": "No se pudo cargar el editor",
+  "editor.load.opening": "Abriendo dibujo",
+  "editor.save.invalidResponse": "Respuesta inesperada al guardar el dibujo",
+  "editor.save.nowReadOnly": "Ahora solo tienes permiso de lectura.",
+  "editor.save.deleted": "Este dibujo ya no existe. No se pueden guardar los cambios.",
+  "editor.save.accessLost": "Ya no tienes acceso a este dibujo.",
+  "editor.history.retentionDays.one": "Las versiones se conservan {count} día",
+  "editor.history.retentionDays.other": "Las versiones se conservan {count} días",
   "editor.chrome.title": "Editor de dibujos",
   "editor.chrome.back": "Volver",
   "editor.chrome.saving": "Guardando cambios…",

@@ -1,3 +1,4 @@
+import { getElementOrder } from "../src/pages/editor/shared";
 import React, { useLayoutEffect } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,11 @@ import { useEditorBroadcast } from "../src/pages/editor/useEditorBroadcast";
 import { useEditorElementTracking } from "../src/pages/editor/useEditorElementTracking";
 const { sockets } = vi.hoisted(() => ({ sockets: [] as any[] }));
 vi.mock("@excalidraw/excalidraw", () => ({
-  CaptureUpdateAction: { IMMEDIATELY: "IMMEDIATELY" },
+  CaptureUpdateAction: { IMMEDIATELY: "IMMEDIATELY", NEVER: "NEVER" },
+  getVisibleSceneBounds: vi.fn(() => [0, 0, 100, 50]),
+  zoomToFitBounds: vi.fn(() => ({
+    appState: { scrollX: -10, scrollY: -20, zoom: { value: 2 } },
+  })),
 }));
 vi.mock("../src/api/sitesSocket", () => ({
   io: vi.fn(() => {
@@ -132,19 +137,26 @@ const flushFrames = async () => {
 };
 const makeHarness = () => {
   let live: any[] = [];
+  let appState: any = { collaborators: new Map() };
   const refs = {
     latestElementsRef: ref<readonly any[]>(live),
     latestFilesRef: ref<any>({}),
     lastSyncedFilesRef: ref({}),
-    lastSyncedElementOrderSigRef: ref(""),
+    lastSyncedElementOrderRef: ref<readonly string[] | null>(null),
   };
   const editor = {
     getSceneElementsIncludingDeleted: () => live,
-    getAppState: () => ({ collaborators: new Map() }),
+    getAppState: () => appState,
     getFiles: () => ({}),
     addFiles: vi.fn(),
+    onUserFollow: vi.fn(() => vi.fn()),
+    onScrollChange: vi.fn(() => vi.fn()),
     updateScene: vi.fn((scene) => {
       if (scene.elements) live = scene.elements;
+      if (scene.collaborators) {
+        appState = { ...appState, collaborators: scene.collaborators };
+      }
+      if (scene.appState) appState = { ...appState, ...scene.appState };
     }),
   };
   const input = {
@@ -152,8 +164,6 @@ const makeHarness = () => {
     me,
     isReady: true,
     excalidrawAPI: ref(editor),
-    computeElementOrderSig: (els: readonly any[]) =>
-      els.map((el) => el.id).join(","),
     recordElementVersion: vi.fn(),
     onAccessDenied: vi.fn(),
   };
@@ -166,6 +176,9 @@ const makeHarness = () => {
     editor,
     input,
     Harness,
+    setAppState: (patch: any) => {
+      appState = { ...appState, ...patch };
+    },
     setLive: (els: any[]) => {
       live = els;
       refs.latestElementsRef.current = els;
@@ -175,7 +188,7 @@ const makeHarness = () => {
 const makeBroadcastHarness = () => {
   const socket = { emit: vi.fn() };
   const save = vi.fn();
-  const lastOrderSig = ref("");
+  const lastOrder = ref<readonly string[] | null>(null);
   let tracking!: ReturnType<typeof useEditorElementTracking>;
   let broadcast!: ReturnType<typeof useEditorBroadcast>;
   function Harness() {
@@ -184,8 +197,7 @@ const makeBroadcastHarness = () => {
       ...nextTracking,
       drawingId: "drawing",
       excalidrawAPI: ref(null),
-      lastLocalChangeAtRef: ref(0),
-      lastSyncedElementOrderSigRef: lastOrderSig,
+      lastSyncedElementOrderRef: lastOrder,
       lastSyncedFilesRef: ref({}),
       latestAppStateRef: ref({}),
       latestFilesRef: ref({}),
@@ -194,8 +206,7 @@ const makeBroadcastHarness = () => {
       uploadedRefs: ref({}),
       debouncedSave: save,
       debouncedSavePreview: vi.fn(),
-      normalizeImageElementStatus: (elements = []) => elements,
-      setHasSceneChangesSinceLoad: vi.fn(),
+      markSceneChanged: vi.fn(),
     });
     useLayoutEffect(() => {
       tracking = nextTracking;
@@ -209,9 +220,9 @@ const makeBroadcastHarness = () => {
     save,
     record: (original: any) => {
       tracking.recordElementVersion(original);
-      lastOrderSig.current = tracking.computeElementOrderSig([original]);
+      lastOrder.current = getElementOrder([original]);
     },
-    broadcast: (next: any) => broadcast([next], {}),
+    broadcast: (next: any) => broadcast.broadcastChanges([next], {}),
   };
 };
 beforeEach(() => {
@@ -504,6 +515,7 @@ describe("remote collaboration staging", () => {
         canEdit: true,
         drawingId: "drawing",
         isReady: true,
+        markSceneChanged: vi.fn(),
         debouncedSavePreview: vi.fn(),
         emitFilesDeltaIfNeeded: fileEmit,
         refs: {
@@ -511,10 +523,8 @@ describe("remote collaboration staging", () => {
           isSyncing,
           isUnmounting: ref(false),
           hasHydratedInitialScene: ref(true),
-          hasSceneChangesSinceLoad: ref(false),
           initialSceneElements: ref([]),
           isBootstrappingScene: ref(false),
-          lastLocalChangeAt: ref(0),
           latestAppState: ref({}),
           latestElements: h.refs.latestElementsRef,
           latestFiles: h.refs.latestFilesRef,
@@ -660,7 +670,7 @@ describe("remote collaboration staging", () => {
     await mount(h.Harness);
     const first = element("first", 1);
     const second = element("second", 1);
-    h.input.lastSyncedElementOrderSigRef.current = "first,second";
+    h.input.lastSyncedElementOrderRef.current = ["first", "second"];
     h.setLive([second, first]);
     sockets[0].handlers.get("element-update")({
       elements: [first, second],
@@ -669,10 +679,13 @@ describe("remote collaboration staging", () => {
     });
     await flushFrames();
     expect(h.refs.latestElementsRef.current).toEqual([second, first]);
-    expect(h.input.lastSyncedElementOrderSigRef.current).toBe("first,second");
-    expect(
-      h.input.computeElementOrderSig(h.refs.latestElementsRef.current),
-    ).not.toBe(h.input.lastSyncedElementOrderSigRef.current);
+    expect(h.input.lastSyncedElementOrderRef.current).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(h.refs.latestElementsRef.current.map((el) => el.id)).not.toEqual(
+      h.input.lastSyncedElementOrderRef.current,
+    );
     sockets[0].handlers.get("element-update")({
       elements: [],
       elementOrder: ["first", "second"],
@@ -789,5 +802,78 @@ describe("remote collaboration staging", () => {
     });
     await flushFrames();
     expect(h.refs.latestElementsRef.current).toEqual([]);
+  });
+});
+describe("Sites presence", () => {
+  it("keys collaborators by person and keeps them as away until their last tab leaves", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    // A cursor alone adds the person, keyed by their user id.
+    sockets[0].handlers.get("cursor-move")({
+      userId: "user-b",
+      username: "B",
+      color: "blue",
+      pointer: { x: 1, y: 2 },
+    });
+    await flushFrames();
+    const collaborators = () => h.editor.getAppState().collaborators;
+    expect([...collaborators().keys()]).toEqual(["user-b"]);
+    const tab = (socketId: string, isActive: boolean) => ({
+      id: "user-b",
+      socketId,
+      name: "B",
+      isActive,
+    });
+    // Two tabs of one person stay one entry, active while either tab is.
+    await act(async () => {
+      sockets[0].handlers.get("presence-update")([
+        tab("socket-b1", false),
+        tab("socket-b2", true),
+      ]);
+    });
+    expect([...collaborators().keys()]).toEqual(["user-b"]);
+    expect(collaborators().get("user-b")).toMatchObject({
+      userState: "active",
+    });
+    // With only the inactive tab left they are away, not gone.
+    await act(async () => {
+      sockets[0].handlers.get("presence-update")([tab("socket-b1", false)]);
+    });
+    expect(collaborators().get("user-b")).toMatchObject({
+      userState: "away",
+    });
+    // They are removed once their last tab leaves.
+    await act(async () => {
+      sockets[0].handlers.get("presence-update")([]);
+    });
+    expect(collaborators().size).toBe(0);
+  });
+  it("lists connected peers before their cursor is seen", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    await act(async () => {
+      sockets[0].handlers.get("presence-update")([
+        {
+          id: "user-c",
+          socketId: "socket-c",
+          name: "C",
+          color: "#00ff00",
+          isActive: false,
+        },
+      ]);
+    });
+    expect(h.editor.getAppState().collaborators.get("user-c")).toEqual({
+      username: "C",
+      color: { background: "#00ff00", stroke: "#00ff00" },
+      id: "user-c",
+      userState: "away",
+    });
+  });
+  it("does not attempt viewport follow on Sites transport", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    expect(sockets[0].handlers.has("visible-bounds")).toBe(false);
+    expect(h.editor.onScrollChange).not.toHaveBeenCalled();
+    expect(h.editor.onUserFollow).not.toHaveBeenCalled();
   });
 });

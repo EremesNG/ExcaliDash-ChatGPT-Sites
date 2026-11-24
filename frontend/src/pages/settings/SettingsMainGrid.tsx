@@ -1,15 +1,18 @@
 import {
   Archive,
+  CopyPlus,
   PanelLeft,
   Eye,
   EyeOff,
   Languages,
+  Monitor,
   Moon,
   Sun,
   Zap,
   ZapOff,
 } from "lucide-react";
 import type * as api from "../../api";
+import { PlayfulSelect } from "../../components/PlayfulSelect";
 import { PlayfulSwitch } from "../../components/PlayfulSwitch";
 import { UpdateSettingsCard } from "./UpdateSettingsCard";
 import {
@@ -28,8 +31,9 @@ import {
 
 type SettingsMainGridProps = {
   exportBackup: () => void;
-  theme: string;
-  toggleTheme: () => void;
+  theme: "light" | "dark";
+  themePreference: api.ThemePreference;
+  onThemePreferenceChange: (preference: api.ThemePreference) => void;
   imageCompression: boolean;
   toggleImageCompression: () => void;
   imageCompressionThresholdMb: number;
@@ -38,6 +42,8 @@ type SettingsMainGridProps = {
   onEditorAutoHideChange: (enabled: boolean) => void;
   compactSidebar: boolean;
   onCompactSidebarChange: (enabled: boolean) => void;
+  appendDroppedDrawings: boolean;
+  onAppendDroppedDrawingsChange: (enabled: boolean) => void;
   updateChannel: api.UpdateChannel;
   updateInfo: api.UpdateInfo | null;
   updateLoading: boolean;
@@ -49,7 +55,8 @@ type SettingsMainGridProps = {
 export const SettingsMainGrid = ({
   exportBackup,
   theme,
-  toggleTheme,
+  themePreference,
+  onThemePreferenceChange,
   imageCompression,
   toggleImageCompression,
   imageCompressionThresholdMb,
@@ -58,6 +65,8 @@ export const SettingsMainGrid = ({
   onEditorAutoHideChange,
   compactSidebar,
   onCompactSidebarChange,
+  appendDroppedDrawings,
+  onAppendDroppedDrawingsChange,
   updateChannel,
   updateInfo,
   updateLoading,
@@ -90,14 +99,28 @@ export const SettingsMainGrid = ({
       </SettingsRow>
 
       <SettingsRow
-        icon={theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
+        icon={theme === "light" ? <Sun size={20} /> : <Moon size={20} />}
         tileClassName="border-black bg-amber-400 text-black dark:border-neutral-700 dark:bg-amber-400 dark:text-black"
         title={t("settings.appearance.title")}
+        description={
+          themePreference === "system"
+            ? t("settings.appearance.followingSystem", { theme: t(theme === "light" ? "settings.appearance.light" : "settings.appearance.dark").toLocaleLowerCase(locale) })
+            : undefined
+        }
       >
-        <PlayfulSwitch
-          checked={theme === "dark"}
-          onChange={() => toggleTheme()}
-          ariaLabel={t("settings.appearance.toggle")}
+        <PlayfulSelect
+          ariaLabel={t("settings.appearance.theme")}
+          value={themePreference}
+          onChange={(value) =>
+            onThemePreferenceChange(
+              value === "light" || value === "dark" ? value : "system",
+            )
+          }
+          options={[
+            { value: "light", label: t("settings.appearance.light"), icon: <Sun size={14} /> },
+            { value: "dark", label: t("settings.appearance.dark"), icon: <Moon size={14} /> },
+            { value: "system", label: t("settings.appearance.system"), icon: <Monitor size={14} /> },
+          ]}
         />
       </SettingsRow>
 
@@ -126,6 +149,19 @@ export const SettingsMainGrid = ({
           checked={compactSidebar}
           onChange={onCompactSidebarChange}
           ariaLabel={t("settings.sidebar.toggle")}
+        />
+      </SettingsRow>
+
+      <SettingsRow
+        icon={<CopyPlus size={20} />}
+        tileClassName="border-black bg-rose-400 text-black dark:border-neutral-700 dark:bg-rose-400 dark:text-black"
+        title={t("settings.drop.append")}
+        description={t("settings.drop.description")}
+      >
+        <PlayfulSwitch
+          checked={appendDroppedDrawings}
+          onChange={onAppendDroppedDrawingsChange}
+          ariaLabel={t("settings.drop.toggle")}
         />
       </SettingsRow>
 

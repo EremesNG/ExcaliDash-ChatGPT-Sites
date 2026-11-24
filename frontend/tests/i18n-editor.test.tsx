@@ -36,7 +36,7 @@ vi.mock("../src/api", () => ({
   getDrawingHistory: vi.fn(),
   getDrawingSnapshot: vi.fn(),
   getDrawing: vi.fn(),
-  updateDrawing: vi.fn(),
+  saveDrawing: vi.fn(),
   isAxiosError: (error: any) => Boolean(error?.isAxiosError),
 }));
 vi.mock("sonner", () => ({
@@ -88,12 +88,12 @@ describe("Spanish editor UI", () => {
   it("reports failed saves in Spanish without replacing the original rejection", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const failure = new Error("offline");
-    vi.mocked(api.updateDrawing).mockRejectedValue(failure);
+    vi.mocked(api.saveDrawing).mockRejectedValue(failure);
     const elements = [{ id: "shape", type: "rectangle", version: 1 }];
     const refs = {
       currentDrawingVersion: ref<number | null>(1), debouncedSave: ref(null),
       excalidrawAPI: ref({ getSceneElementsIncludingDeleted: () => elements, getAppState: () => ({}), getFiles: () => ({}) }),
-      isSyncing: ref(false), isUnmounting: ref(false), lastLocalChangeAt: ref(0),
+      isSyncing: ref(false), isUnmounting: ref(false), localSceneRevision: ref(1), savedSceneRevision: ref(0),
       lastPersistedElements: ref([]), lastPersistedFiles: ref({}), lastSyncedFiles: ref({}),
       latestAppState: ref({}), latestElements: ref(elements), latestFiles: ref({}),
       saveQueue: ref(Promise.resolve()), suspiciousBlankLoad: ref(false), uploadedRefs: ref({}),
@@ -118,7 +118,7 @@ describe("Spanish editor UI", () => {
     const refs: Parameters<typeof useEditorSceneLoader>[0]["refs"] = {
       elementVersionMap: ref(new Map()), saveQueue: ref(Promise.resolve()),
       latestElements: ref([]), initialSceneElements: ref([]), latestFiles: ref({}),
-      isSyncing: ref(false), lastSyncedFiles: ref({}), lastSyncedElementOrderSig: ref(""),
+      isSyncing: ref(false), lastSyncedFiles: ref({}), lastSyncedElementOrder: ref(null), localSceneRevision: ref(0), savedSceneRevision: ref(0),
       lastPersistedFiles: ref({}), currentDrawingVersion: ref(null), lastPersistedElements: ref([]),
       suspiciousBlankLoad: ref(false), hasSceneChangesSinceLoad: ref(false), excalidrawAPI: ref(null),
       latestAppState: ref({}), isBootstrappingScene: ref(true), hasHydratedInitialScene: ref(false),
@@ -177,7 +177,7 @@ describe("Spanish editor UI", () => {
           excalidrawAPI: ref({ getAppState: () => ({}) }),
           hasHydratedInitialScene: ref(true), hasSceneChangesSinceLoad: ref(false),
           initialSceneElements: ref([]), isBootstrappingScene: ref(false),
-          isSyncing: ref(false), isUnmounting: ref(false), lastLocalChangeAt: ref(0),
+          isSyncing: ref(false), isUnmounting: ref(false), localSceneRevision: ref(1), savedSceneRevision: ref(0),
           latestAppState: ref({}), latestElements: ref([]), latestFiles: ref({}),
           debouncedSave: ref(null), suspiciousBlankLoad: ref(false),
         },
