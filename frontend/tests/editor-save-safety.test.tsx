@@ -393,6 +393,35 @@ describe("persisted scene settings", () => {
 });
 describe("conflict reconciliation", () => {
   it.each([
+    { kind: "missing", remote: undefined },
+    { kind: "null", remote: null },
+    { kind: "primitive", remote: "invalid" },
+    { kind: "array", remote: [] },
+    { kind: "non-plain object", remote: new Date(0) },
+  ])(
+    "leaves the accepted settings base and local state unchanged for $kind remote appState",
+    async ({ remote }) => {
+      const h = makeHarness();
+      const base = { viewBackgroundColor: "#ff0000" };
+      const local = { ...base, gridModeEnabled: true };
+      h.refs.lastAcceptedAppState.current = base;
+      h.editor.getAppState = () => local;
+      vi.mocked(api.getDrawing).mockResolvedValueOnce({
+        version: 2,
+        elements: [element("local")],
+        files: {},
+        appState: remote,
+      } as never);
+
+      const merged = await reloadAndReconcile(
+        h.refs, "drawing", [element("local")], {},
+      );
+
+      expect(merged?.appState).toEqual(local);
+      expect(h.refs.lastAcceptedAppState.current).toBe(base);
+    },
+  );
+  it.each([
     ["stickynote", "baseHeight", 100, 140],
     ["text", "baseFontSize", 20, 28],
   ])(
@@ -460,6 +489,49 @@ describe("conflict reconciliation", () => {
   });
 });
 describe("serialized saves", () => {
+  it.each([
+    ["empty", {}, "#ffffff", 20],
+    ["partially sparse", { gridSize: 40 }, "#ffffff", 40],
+    [
+      "explicit",
+      { viewBackgroundColor: "#00ff00", gridSize: 40, gridModeEnabled: false },
+      "#00ff00",
+      40,
+    ],
+  ])("preserves remote settings from the %s snapshot and the local grid toggle on retry", async (_label, remote, background, gridSize) => {
+    const h = makeHarness();
+    const base = { viewBackgroundColor: "#ff0000", gridSize: 30, gridModeEnabled: false };
+    const local = { ...base, gridModeEnabled: true };
+    h.refs.lastAcceptedAppState.current = base;
+    h.editor.getAppState = () => local;
+    await mount(h.Harness);
+    vi.mocked(api.saveDrawing).mockRejectedValueOnce({ response: { status: 409 } });
+    vi.mocked(api.getDrawing).mockResolvedValueOnce({
+      version: 2,
+      elements: [element("local")],
+      files: {},
+      appState: remote,
+    } as never);
+
+    await act(async () => {
+      const save = h.persistence.enqueueSceneSave("drawing", [element("local")], local, {});
+      await vi.advanceTimersByTimeAsync(500);
+      await save;
+    });
+
+    expect(api.saveDrawing).toHaveBeenNthCalledWith(
+      2,
+      "drawing",
+      expect.objectContaining({
+        version: 2,
+        appState: expect.objectContaining({
+          viewBackgroundColor: background,
+          gridSize,
+          gridModeEnabled: true,
+        }),
+      }),
+    );
+  });
   it("retries a legacy drawing with the local background and peer grid size, not the peer grid step", async () => {
     const h = makeHarness();
     const loader = makeLoader(h);

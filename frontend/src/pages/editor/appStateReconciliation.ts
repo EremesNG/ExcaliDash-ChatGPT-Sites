@@ -29,20 +29,20 @@ export const mergePersistedAppState = (
   if (!remote || typeof remote !== "object" || Array.isArray(remote)) {
     return { nextBase: base, patch };
   }
-  // Compare the values Excalidraw would restore, not legacy nulls or omissions.
-  const nextBase: Record<string, unknown> = getCanonicalSceneAppState(base);
-  const localState = getCanonicalSceneAppState(local);
-  const remoteState = remote as Record<string, unknown>;
-  const canonicalRemote = getCanonicalSceneAppState(remoteState);
-  for (const key of RECONCILED_APP_STATE_KEYS) {
-    if (!Object.hasOwn(remoteState, key)) continue;
-    const value = canonicalRemote[key];
-    const localChanged = localState[key] !== nextBase[key];
-    if (!localChanged && localState[key] !== value) {
-      patch[key] = value;
-    }
-    // Track what the peer committed, not the merged view with unsaved edits.
-    nextBase[key] = value;
+  const prototype = Object.getPrototypeOf(remote);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return { nextBase: base, patch };
   }
-  return { nextBase, patch };
+  // A valid remote snapshot replaces persisted settings: omitted keys restore to defaults.
+  const baseState = getCanonicalSceneAppState(base);
+  const localState = getCanonicalSceneAppState(local);
+  const remoteState = getCanonicalSceneAppState(remote as Record<string, unknown>);
+  for (const key of RECONCILED_APP_STATE_KEYS) {
+    const localChanged = localState[key] !== baseState[key];
+    if (!localChanged && localState[key] !== remoteState[key]) {
+      patch[key] = remoteState[key];
+    }
+  }
+  // Track what the peer committed, not the merged view with unsaved edits.
+  return { nextBase: remoteState, patch };
 };
