@@ -13,8 +13,8 @@ import {
 import {
   buildRemoteSceneUpdate,
   getElementOrder,
-  mergePersistedAppState,
 } from "./shared";
+import { mergePersistedAppState } from "./appStateReconciliation";
 import * as api from "../../api";
 import { reconcileElements } from "../../utils/sync";
 

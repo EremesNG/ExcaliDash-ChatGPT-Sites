@@ -7,10 +7,13 @@ import { rehydrateFilesFromUrls } from "../src/utils/rehydrateFiles";
 import { getFilesDelta } from "../src/pages/editor/shared";
 import { useEditorCanvasHandlers } from "../src/pages/editor/useEditorCanvasHandlers";
 import { useEditorCollaboration } from "../src/pages/editor/useEditorCollaboration";
+import { useEditorGridStep } from "../src/pages/editor/useEditorGridStep";
+import { GridStepSelector } from "../src/components/GridStepSelector";
 import { useEditorBroadcast } from "../src/pages/editor/useEditorBroadcast";
 import { useEditorElementTracking } from "../src/pages/editor/useEditorElementTracking";
 const { sockets } = vi.hoisted(() => ({ sockets: [] as any[] }));
-vi.mock("@excalidraw/excalidraw", () => ({
+vi.mock("@excalidraw/excalidraw", async () => ({
+  ...(await (await import("./helpers/excalidrawRestore")).loadExcalidrawRestore()),
   CaptureUpdateAction: { IMMEDIATELY: "IMMEDIATELY", NEVER: "NEVER" },
   getVisibleSceneBounds: vi.fn(() => [0, 0, 100, 50]),
   zoomToFitBounds: vi.fn(() => ({
@@ -776,15 +779,47 @@ describe("remote collaboration staging", () => {
     await flushFrames();
     expect(h.refs.latestFilesRef.current).toEqual(newer);
   });
+  it("keeps the canvas and selector on the account grid step after a peer save", async () => {
+    const h = makeHarness();
+    function Harness() {
+      const [gridStep, setGridStep] = React.useState(5);
+      useEditorGridStep({ ...h.input, gridStep });
+      return (
+        <>
+          <h.Harness />
+          <GridStepSelector gridStep={gridStep} onChange={setGridStep} />
+        </>
+      );
+    }
+    await mount(Harness);
+    const selector = () => renderer!.root.findByType("input");
+    expect(h.editor.getAppState().gridStep).toBe(selector().props.value);
+
+    await act(async () => {
+      sockets[0].handlers.get("element-update")({
+        persisted: true,
+        version: 2,
+        elements: [element("peer", 2)],
+        appState: { gridStep: 8, theme: "dark", langCode: "es-ES" },
+      });
+    });
+    await flushFrames();
+
+    expect(h.input.currentDrawingVersionRef.current).toBe(2);
+    expect(selector().props.value).toBe(5);
+    expect(h.editor.getAppState().gridStep).toBe(5);
+    expect(h.editor.getAppState()).not.toHaveProperty("theme");
+    expect(h.editor.getAppState()).not.toHaveProperty("langCode");
+  });
   it("catches up the peer shape and grid without overwriting the unsaved local background", async () => {
     const h = makeHarness();
     await mount(h.Harness);
-    h.setAppState({ viewBackgroundColor: "#ff0000", gridSize: null });
+    h.setAppState({ viewBackgroundColor: "#ff0000", gridSize: 20 });
     vi.mocked(api.getDrawing).mockResolvedValueOnce({
       version: 2,
       elements: [element("peer", 2)],
       files: {},
-      appState: { viewBackgroundColor: "#ffffff", gridSize: 20 },
+      appState: { viewBackgroundColor: "#ffffff", gridSize: 40 },
     } as never);
 
     await act(async () => {
@@ -794,7 +829,7 @@ describe("remote collaboration staging", () => {
 
     expect(h.editor.getSceneElementsIncludingDeleted()).toEqual([element("peer", 2)]);
     expect(h.editor.getAppState()).toMatchObject({
-      viewBackgroundColor: "#ff0000", gridSize: 20,
+      viewBackgroundColor: "#ff0000", gridSize: 40,
     });
     expect(h.input.currentDrawingVersionRef.current).toBe(2);
   });

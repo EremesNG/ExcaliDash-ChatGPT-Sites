@@ -88,43 +88,6 @@ export const getPersistedAppState = (
   return base;
 };
 
-const PERSISTED_APP_STATE_KEYS = [
-  "viewBackgroundColor",
-  "gridSize",
-  "gridStep",
-  "gridModeEnabled",
-] as const;
-
-export const mergePersistedAppState = (
-  base: Record<string, unknown>,
-  local: Record<string, unknown>,
-  remote: unknown,
-) => {
-  const nextBase = { ...base };
-  const patch: Record<string, unknown> = {};
-  if (!remote || typeof remote !== "object" || Array.isArray(remote)) {
-    return { nextBase, patch };
-  }
-  // Legacy scenes can omit grid settings that Excalidraw supplies on restore.
-  const defaults: Record<string, unknown> = {
-    ...getPersistedAppState(null),
-    gridStep: 5,
-    gridModeEnabled: false,
-  };
-  const remoteState = remote as Record<string, unknown>;
-  for (const key of PERSISTED_APP_STATE_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(remoteState, key)) continue;
-    const value = remoteState[key] ?? defaults[key];
-    const localChanged = (local[key] ?? defaults[key]) !== (base[key] ?? defaults[key]);
-    if (!localChanged && local[key] !== value) {
-      patch[key] = value;
-    }
-    // Track what the peer committed, not the merged view with unsaved edits.
-    nextBase[key] = value;
-  }
-  return { nextBase, patch };
-};
-
 export const buildRemoteSceneUpdate = ({
   collaborators,
   localElements = [],

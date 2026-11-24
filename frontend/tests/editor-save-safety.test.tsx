@@ -1,11 +1,13 @@
 import React, { useLayoutEffect, useState } from "react";
 import ShallowRenderer from "react-test-renderer/shallow";
 import { Editor } from "../src/pages/Editor";
+import { restoreAppState } from "@excalidraw/excalidraw";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/api";
 import { reloadAndReconcile } from "../src/pages/editor/reconcileSave";
 import { useEditorPersistence } from "../src/pages/editor/useEditorPersistence";
+import { useEditorSceneLoader } from "../src/pages/editor/useEditorSceneLoader";
 import { reconcileElements } from "../src/utils/sync";
 const { route } = vi.hoisted(() => ({ route: { id: "drawing" } }));
 vi.mock("react-router-dom", () => ({
@@ -13,7 +15,10 @@ vi.mock("react-router-dom", () => ({
   useNavigate: vi.fn(),
   useLocation: vi.fn(),
 }));
-vi.mock("@excalidraw/excalidraw", () => ({ exportScene: vi.fn() }));
+vi.mock("@excalidraw/excalidraw", async () => ({
+  ...(await (await import("./helpers/excalidrawRestore")).loadExcalidrawRestore()),
+  exportScene: vi.fn(),
+}));
 vi.mock("../src/api", () => ({
   getDrawing: vi.fn(),
   saveDrawing: vi.fn(),
@@ -197,10 +202,58 @@ describe("conflict reconciliation", () => {
   });
 });
 describe("serialized saves", () => {
-  it("retries with the local background, peer shape, and peer grid change", async () => {
+  it("retries a legacy drawing with the local background and peer grid size, not the peer grid step", async () => {
     const h = makeHarness();
-    await mount(h.Harness);
-    h.editor.getAppState = () => ({ viewBackgroundColor: "#ff0000" });
+    const loader: Parameters<typeof useEditorSceneLoader>[0] = {
+      id: "drawing",
+      user: null,
+      isReady: false,
+      canEdit: true,
+      debouncedSaveLibrary: vi.fn(),
+      location: { pathname: "/editor/drawing", hash: "", search: "" },
+      navigate: vi.fn(),
+      refs: {
+        ...h.refs,
+        elementVersionMap: ref(new Map()),
+        initialSceneElements: ref([]),
+        lastSyncedElementOrder: ref(null),
+        hasSceneChangesSinceLoad: ref(false),
+        isBootstrappingScene: ref(true),
+        hasHydratedInitialScene: ref(false),
+      },
+      setAccessLevel: vi.fn(),
+      setDrawingName: vi.fn(),
+      setIsReady: vi.fn(),
+      setIsSceneLoading: vi.fn(),
+      setLoadError: vi.fn(),
+      recordElementVersion: vi.fn(),
+      normalizeImageElementStatus: (elements = []) => elements,
+      setInitialData: (scene) => {
+        if (!scene) return;
+        const restored = restoreAppState(scene.appState, null);
+        h.editor.getAppState = () => restored;
+        h.refs.excalidrawAPI.current = h.editor;
+      },
+    };
+    vi.mocked(api.getDrawing).mockResolvedValueOnce({
+      version: 1,
+      accessLevel: "owner",
+      elements: [element("local")],
+      files: {},
+      appState,
+    } as never);
+    function Harness() {
+      useEditorSceneLoader(loader);
+      return <h.Harness />;
+    }
+    await mount(Harness);
+    const restored = h.editor.getAppState();
+    expect(restored).toMatchObject({ gridSize: 20 });
+    h.editor.getAppState = () => ({
+      ...restored,
+      viewBackgroundColor: "#ff0000",
+      gridStep: 5,
+    });
     vi.mocked(api.saveDrawing).mockRejectedValueOnce({
       response: { status: 409 },
     });
@@ -208,7 +261,7 @@ describe("serialized saves", () => {
       version: 2,
       elements: [element("peer")],
       files: {},
-      appState: { viewBackgroundColor: "#ffffff", gridSize: 20 },
+      appState: { viewBackgroundColor: "#ffffff", gridSize: 40, gridStep: 8 },
     } as never);
 
     await act(async () => {
@@ -225,7 +278,11 @@ describe("serialized saves", () => {
       expect.objectContaining({
         version: 2,
         elements: expect.arrayContaining([element("local"), element("peer")]),
-        appState: { viewBackgroundColor: "#ff0000", gridSize: 20 },
+        appState: expect.objectContaining({
+          viewBackgroundColor: "#ff0000",
+          gridSize: 40,
+          gridStep: 5,
+        }),
       }),
     );
   });

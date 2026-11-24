@@ -25,6 +25,7 @@ import {
   hasRenderableElements,
   haveSameElements,
 } from "./shared";
+import { getCanonicalSceneAppState } from "./appStateReconciliation";
 import type { UploadedFileRefs } from "./shared";
 
 class DrawingSaveConflictError extends Error {
@@ -298,7 +299,8 @@ export const useEditorPersistence = ({
             updated.version >= (refs.currentDrawingVersion.current ?? 0)
           ) {
             refs.currentDrawingVersion.current = updated.version;
-            refs.lastAcceptedAppState.current = appStateToSave;
+            refs.lastAcceptedAppState.current =
+              getCanonicalSceneAppState(appStateToSave);
           }
           refs.lastPersistedElements.current = elementsToSave;
           refs.savedSceneRevision.current = revision;

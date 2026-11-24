@@ -23,9 +23,10 @@ vi.mock("react-dom", () => ({
     return children;
   },
 }));
-vi.mock("@excalidraw/excalidraw", () => {
+vi.mock("@excalidraw/excalidraw", async () => {
   const Item = ({ children }: { children: React.ReactNode }) => <>{children}</>;
   return {
+    ...(await (await import("./helpers/excalidrawRestore")).loadExcalidrawRestore()),
     Excalidraw: (props: Record<string, unknown>) =>
       React.createElement("mock-canvas", props),
     MainMenu: Object.assign(Item, {

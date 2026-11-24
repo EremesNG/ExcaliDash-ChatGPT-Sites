@@ -13,6 +13,7 @@ import {
   getPersistedAppState,
   hasRenderableElements,
 } from "./shared";
+import { getCanonicalSceneAppState } from "./appStateReconciliation";
 import { rebaseLibrary, resetLibrarySync } from "./librarySync";
 
 type AccessLevel = "none" | "view" | "edit" | "owner";
@@ -191,7 +192,8 @@ export const useEditorSceneLoader = ({
         refs.lastPersistedElements.current = elements;
         elements.forEach((element: any) => recordElementVersion(element));
         const persistedAppState = getPersistedAppState(data.appState);
-        refs.lastAcceptedAppState.current = persistedAppState;
+        refs.lastAcceptedAppState.current =
+          getCanonicalSceneAppState(persistedAppState);
         const hydratedAppState = {
           ...persistedAppState,
           collaborators: new Map(),

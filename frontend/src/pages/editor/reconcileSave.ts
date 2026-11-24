@@ -5,7 +5,7 @@ import {
   filesNeedRehydration,
   rehydrateFilesFromUrls,
 } from "../../utils/rehydrateFiles";
-import { mergePersistedAppState } from "./shared";
+import { mergePersistedAppState } from "./appStateReconciliation";
 
 type ReconcileRefs = {
   currentDrawingVersion: MutableRefObject<number | null>;
