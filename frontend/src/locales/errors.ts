@@ -50,6 +50,10 @@ export const en = {
   "errors.IMAGE_UNAVAILABLE": "Image unavailable",
   "errors.FEATURE_UNAVAILABLE": "This feature is unavailable on this private personal Site",
   "errors.ENDPOINT_NOT_FOUND": "Endpoint not found",
+  "errors.INVALID_GZIP": "Invalid gzip body",
+  "errors.UNSUPPORTED_CONTENT_ENCODING": "Unsupported content encoding",
+  "errors.INVALID_PREFERENCES": "Invalid preferences",
+  "errors.DRAWING_NOT_TRASHED": "Drawing is no longer in Trash",
 };
 
 export const es: Record<keyof typeof en, string> = {
@@ -102,6 +106,10 @@ export const es: Record<keyof typeof en, string> = {
   "errors.IMAGE_UNAVAILABLE": "La imagen no está disponible",
   "errors.FEATURE_UNAVAILABLE": "Esta función no está disponible en este Site personal privado",
   "errors.ENDPOINT_NOT_FOUND": "No se ha encontrado la ruta de la API",
+  "errors.INVALID_GZIP": "El cuerpo gzip no es válido",
+  "errors.UNSUPPORTED_CONTENT_ENCODING": "La codificación del contenido no es compatible",
+  "errors.INVALID_PREFERENCES": "Las preferencias no son válidas",
+  "errors.DRAWING_NOT_TRASHED": "El dibujo ya no está en la papelera",
 };
 
 export const zhCN: Partial<Record<keyof typeof en, string>> = {};

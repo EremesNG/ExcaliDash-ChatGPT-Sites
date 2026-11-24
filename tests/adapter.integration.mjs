@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { setTimeout as delay } from 'node:timers/promises';
 import { build } from '../frontend/node_modules/esbuild/lib/main.js';
 import { API_ERROR_CODES } from '../server/error-codes.ts';
@@ -56,6 +58,10 @@ const errorContract=[
  ['IMAGE_UNAVAILABLE',500,'Image unavailable'],
  ['FEATURE_UNAVAILABLE',409,'This feature is unavailable on this private personal Site'],
  ['ENDPOINT_NOT_FOUND',404,'Endpoint not found'],
+ ['INVALID_GZIP',400,'Invalid gzip body'],
+ ['UNSUPPORTED_CONTENT_ENCODING',415,'Unsupported content encoding'],
+ ['INVALID_PREFERENCES',400,'Invalid preferences'],
+ ['DRAWING_NOT_TRASHED',409,'Drawing is no longer in Trash'],
 ];
 const require=createRequire(import.meta.url),wr=createRequire(require.resolve('wrangler/package.json'));
 const {Miniflare}=wr('miniflare');
@@ -65,13 +71,16 @@ const options={modules:true,scriptPath:'.sites-runtime/tests/api.js',compatibili
 const mf=new Miniflare(options);
 const results=[];
 try{
- const sql=readFileSync('drizzle/0000_thick_baron_zemo.sql','utf8');
- const initializeDatabase=async(instance)=>{
+ const migrations=readdirSync('drizzle').filter(name=>name.endsWith('.sql')).sort();
+ const initializeDatabase=async(instance,files=migrations)=>{
   const db=await instance.getD1Database('DB');
-  for(const statement of sql.split('--> statement-breakpoint'))await db.prepare(statement.trim()).run();
+  for(const file of files){
+   const sql=readFileSync('drizzle/'+file,'utf8');
+   for(const statement of sql.split('--> statement-breakpoint').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+  }
  };
  await initializeDatabase(mf);
- const requestFor=(instance)=>async(path,method='GET',data,identity='alice',extra={})=>{const headers={...(identity?{'oai-authenticated-user-id':identity,'oai-authenticated-user-email':identity+'@example.test'}:{}),...extra};let body;if(data!==undefined){if(data instanceof FormData){const encoded=new Response(data);body=new Uint8Array(await encoded.arrayBuffer());headers['Content-Type']=encoded.headers.get('Content-Type');}else if(data instanceof Uint8Array)body=data;else{body=JSON.stringify(data);headers['Content-Type']='application/json';}}const r=await instance.dispatchFetch('http://site.test/api'+path,{method,headers,body});return {r,data:r.headers.get('content-type')?.includes('json')?await r.json():await r.arrayBuffer()};};
+ const requestFor=(instance)=>async(path,method='GET',data,identity='alice',extra={})=>{const headers={...(identity?{'oai-authenticated-user-id':identity,'oai-authenticated-user-email':identity+'@example.test'}:{}),...extra};let body;if(data!==undefined){if(data instanceof FormData){const encoded=new Response(data);body=new Uint8Array(await encoded.arrayBuffer());headers['Content-Type']=encoded.headers.get('Content-Type');}else if(data instanceof Uint8Array)body=data;else{body=JSON.stringify(data);headers['Content-Type']='application/json';}}const r=await instance.dispatchFetch('http://site.test/api'+path,{method,headers,body});if(r.headers.get('content-type')?.includes('json')){const raw=await r.text();return {r,raw,data:JSON.parse(raw)};}return {r,data:await r.arrayBuffer()};};
  const request=requestFor(mf);
  const ok=(label)=>{results.push(label);console.log('PASS',label)};
  const apiError=({r,data},code)=>{
@@ -83,10 +92,10 @@ try{
   assert.equal(r.headers.get('cache-control'),'no-store');
   assert.equal(r.headers.get('x-content-type-options'),'nosniff');
  };
- assert.equal(errorContract.length,49);
- assert.equal(new Set(errorContract.map(([code])=>code)).size,49);
+ assert.equal(errorContract.length,53);
+ assert.equal(new Set(errorContract.map(([code])=>code)).size,53);
  assert.deepEqual(API_ERROR_CODES,Object.fromEntries(errorContract.map(([code,,error])=>[error,code])));
- ok('error catalogue matches all 49 frozen codes and exact messages');
+ ok('error catalogue matches all 53 frozen codes and exact messages');
  const editorScenario=async(outboundService,check)=>{
   const instance=new Miniflare({...options,outboundService});
   try{
@@ -188,6 +197,103 @@ try{
  apiError(await request('/collections/'+c.id+'/shares','POST',{}),'SITE_PRIVATE');
  apiError(await request('/drawings/'+d.id+'/share','POST',{}),'FEATURE_UNAVAILABLE');
  ok('private sharing and unsupported features retain their 409 errors with distinct codes');
+ const metadataCollection=(await request('/collections','POST',{name:'Temporary'})).data;
+ const cacheFixture=(await request('/drawings','POST',{name:'Cache',collectionId:metadataCollection.id,preview:'<svg/>'})).data;
+ const cachePath='/drawings/'+cacheFixture.id;
+ const assertRevalidation=async(path,notFound='DRAWING_NOT_FOUND',hashBody=true)=>{
+  const first=await request(path);
+  assert.equal(first.r.status,200);
+  assert.equal(first.r.headers.get('cache-control'),'private, no-cache');
+  const tag=first.r.headers.get('etag');
+  assert.match(tag,/^"[^"\s]+"$/);
+  if(hashBody)assert.equal(tag,'"'+createHash('sha256').update(first.raw).digest('hex')+'"');
+  for(const value of [tag,`"other,tag", W/${tag}`, '*']){
+   const fresh=await request(path,'GET',undefined,'alice',{'If-None-Match':value});
+   assert.equal(fresh.r.status,304);
+   assert.equal(fresh.data.byteLength,0);
+   assert.equal(fresh.r.headers.get('etag'),tag);
+   assert.equal(fresh.r.headers.get('cache-control'),'private, no-cache');
+  }
+  const headers={'If-None-Match':tag};
+  apiError(await request(path,'GET',undefined,'bob',headers),notFound);
+  apiError(await request(path,'GET',undefined,null,headers),'AUTH_REQUIRED');
+  return first;
+ };
+ const full=await assertRevalidation(cachePath);
+ assert.equal(full.data.preview,'<svg/>');
+ const omitted=await assertRevalidation(cachePath+'?omitPreview=1');
+ assert.equal(Object.hasOwn(omitted.data,'preview'),false);
+ assert.equal(omitted.data.hasPreview,true);
+ assert.equal((await request('/drawings/'+d.id+'?omitPreview=1')).data.hasPreview,false);
+ assert.equal((await request(cachePath+'?omitPreview=1','GET',undefined,'alice',{'If-None-Match':full.r.headers.get('etag')})).r.status,200);
+ const preview=await assertRevalidation(cachePath+'/preview');
+ assert.deepEqual(preview.data,{preview:'<svg/>',updatedAt:Date.parse(full.data.updatedAt)});
+ let previous=full;
+ for(const [mutate,key,expected] of [
+  [()=>request(cachePath,'PUT',{name:'Renamed'}),'name','Renamed'],
+  [()=>request('/auth/profile','PUT',{name:'Renamed Alice'}),'creatorName','Renamed Alice'],
+  [()=>request('/collections/'+metadataCollection.id,'DELETE'),'collectionId',null],
+ ]){
+  assert.equal((await mutate()).r.status,200);
+  const next=await request(cachePath,'GET',undefined,'alice',{'If-None-Match':previous.r.headers.get('etag')});
+  assert.equal(next.r.status,200);
+  assert.equal(next.data[key],expected);
+  assert.equal(next.data.version,full.data.version);
+  assert.notEqual(next.r.headers.get('etag'),previous.r.headers.get('etag'));
+  previous=next;
+ }
+ assert.equal((await request(cachePath,'DELETE')).r.status,200);
+ ok('drawing and preview revalidate privately after ownership and hash the selected response, including metadata-only changes');
+ const saveFixture=(await request('/drawings','POST',{name:'Save contract'})).data;
+ const savePath='/drawings/'+saveFixture.id;
+ const compressedHeaders={'Content-Type':'application/json','Content-Encoding':'gzip',Prefer:'respond-async, RETURN=MINIMAL'};
+ const compressed=(value)=>gzipSync(JSON.stringify(value));
+ const savedMinimal=await request(savePath,'PUT',compressed({version:1,elements:[{id:'gzip-é'}]}),'alice',compressedHeaders);
+ assert.equal(savedMinimal.r.status,200);
+ assert.deepEqual(savedMinimal.data,{id:saveFixture.id,name:'Save contract',userId:'alice',collectionId:null,accessLevel:'owner',version:2,createdAt:saveFixture.createdAt,updatedAt:savedMinimal.data.updatedAt});
+ assert.equal(new Date(savedMinimal.data.updatedAt).toISOString(),savedMinimal.data.updatedAt);
+ assert.deepEqual((await request(savePath)).data.elements,[{id:'gzip-é'}]);
+ apiError(await request(savePath,'PUT',Buffer.from('not gzip'),'alice',compressedHeaders),'INVALID_GZIP');
+ apiError(await request(savePath,'PUT',compressed({version:2}).subarray(0,-4),'alice',compressedHeaders),'INVALID_GZIP');
+ apiError(await request(savePath,'PUT',gzipSync('unparseable JSON'),'alice',compressedHeaders),'INVALID_JSON');
+ apiError(await request(savePath,'PUT',compressed({version:2,padding:'é'.repeat(8*1024*1024)}),'alice',compressedHeaders),'REQUEST_TOO_LARGE');
+ apiError(await request(savePath,'PUT',{},'alice',{'Content-Encoding':'made-up'}),'UNSUPPORTED_CONTENT_ENCODING');
+ apiError(await request(savePath,'PUT',compressed({version:1,elements:[]}),'alice',compressedHeaders),'VERSION_CONFLICT');
+ apiError(await request(savePath,'PUT',compressed({version:2,elements:[]}),'bob',compressedHeaders),'DRAWING_NOT_FOUND');
+ apiError(await request(savePath,'PUT',compressed({version:2,elements:[]}),'alice',{...compressedHeaders,Origin:'http://evil.test'}),'CSRF_ORIGIN_REJECTED');
+ assert.equal((await request(savePath)).data.version,2);
+ assert.equal((await request(savePath+'/history')).data.retentionDays,null);
+ assert.equal((await request(savePath,'DELETE')).r.status,200);
+ ok('minimal gzip saves preserve authorization and CAS; invalid encodings and inflated byte limits are enforced; history reports unlimited retention');
+
+ assert.equal((await request('/auth/preferences')).data.preferences.appendDroppedDrawings,false);
+ const setPreference=await request('/auth/preferences','PUT',compressed({appendDroppedDrawings:true}),'alice',compressedHeaders);
+ assert.equal(setPreference.r.status,200);
+ assert.equal(setPreference.data.preferences.appendDroppedDrawings,true);
+ apiError(await request('/auth/preferences','PUT',{appendDroppedDrawings:'false'}),'INVALID_PREFERENCES');
+ assert.equal((await request('/auth/preferences')).data.preferences.appendDroppedDrawings,true);
+ assert.equal((await request('/auth/preferences','GET',undefined,'bob')).data.preferences.appendDroppedDrawings,false);
+ assert.equal((await request('/auth/preferences','PUT',{appendDroppedDrawings:false})).data.preferences.appendDroppedDrawings,false);
+ ok('boolean drop-to-append preference defaults off, persists across requests and is isolated by user');
+
+ const trashFixture=(await request('/drawings','POST',{name:'Trash guard',elements:[{id:'before-trash'}]})).data;
+ const trashPath='/drawings/'+trashFixture.id, guardedDelete=trashPath+'?requireTrashed=1';
+ assert.equal((await request(trashPath,'PUT',{version:1,elements:[{id:'after-save'}]})).r.status,200);
+ const snapshot=(await request(trashPath+'/history')).data.snapshots[0];
+ apiError(await request(guardedDelete,'DELETE'),'DRAWING_NOT_TRASHED');
+ assert.equal((await request(trashPath)).data.id,trashFixture.id);
+ await request(trashPath,'PUT',{collectionId:'trash'});
+ apiError(await request(guardedDelete,'DELETE',undefined,'bob'),'DRAWING_NOT_FOUND');
+ await request(trashPath,'PUT',{collectionId:null});
+ apiError(await request(guardedDelete,'DELETE'),'DRAWING_NOT_TRASHED');
+ const intact=(await request(trashPath)).data;
+ assert.equal(intact.name,'Trash guard');
+ assert.deepEqual(intact.elements,[{id:'after-save'}]);
+ assert.deepEqual((await request(trashPath+'/history/'+snapshot.id)).data.elements,[{id:'before-trash'}]);
+ await request(trashPath,'PUT',{collectionId:'trash'});
+ assert.equal((await request(guardedDelete,'DELETE')).r.status,200);
+ apiError(await request(trashPath),'DRAWING_NOT_FOUND');
+ ok('permanent deletion with requireTrashed rejects untrashed, restored and foreign drawings');
  const e={id:'shape',type:'rectangle',version:1,versionNonce:1,x:10,y:20,width:100,height:100};
  let saved=(await request('/drawings/'+d.id,'PUT',{version:d.version,elements:[e],appState:{viewBackgroundColor:'#fff'}})).data;assert.equal(saved.elements.length,1);assert.equal(saved.version,2);
  apiError(await request('/drawings/'+d.id,'PUT',{version:1,elements:[]}),'VERSION_CONFLICT');assert.equal((await request('/drawings/'+d.id)).data.elements.length,1);ok('R2 scene persistence and optimistic conflict protection');
@@ -195,6 +301,8 @@ try{
  let h=(await request('/drawings/'+d.id+'/history')).data;assert.equal(h.totalCount,2);let s=(await request('/drawings/'+d.id+'/history/'+h.snapshots[1].id)).data;assert.equal(s.elements.length,0);assert.equal((await request('/drawings/'+d.id+'/history/'+h.snapshots[1].id+'/restore','POST',{})).r.status,200);assert.equal((await request('/drawings/'+d.id)).data.elements.length,0);assert.equal((await request('/drawings/'+d.id+'/history')).data.totalCount,3);ok('history read and restore preserve a reversible snapshot');
  const image=Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==','base64'));
  const up=await request('/drawings/'+d.id+'/files/image1','PUT',image,'alice',{'Content-Type':'image/png'});assert.equal(up.r.status,200);const f={id:'image1',mimeType:'image/png',dataURL:up.data.url,created:1};saved=(await request('/drawings/'+d.id,'PUT',{files:{image1:f}})).data;assert.equal(Object.keys(saved.files).length,1);assert.equal((await request('/files/'+d.id+'/image1')).data.byteLength,image.length);assert.equal((await request('/files/'+d.id+'/image1','GET',undefined,'bob')).r.status,404);ok('R2 image upload, private download, and file reference persistence');
+ await assertRevalidation('/files/'+d.id+'/image1','DRAWING_NOT_FOUND',false);
+ ok('files revalidate privately only after authorization');
  assert.equal((await request('/drawings/'+d.id,'PUT',{files:{evil:{dataURL:'https://evil.test/image.png'}}})).r.status,400);assert.equal((await request('/drawings/'+d.id)).data.files.image1.dataURL,up.data.url);ok('external file references rejected without losing existing images');
  const dup=(await request('/drawings/'+d.id+'/duplicate','POST',{})).data;assert.ok(dup.id&&dup.id!==d.id);assert.ok(dup.files.image1.dataURL.includes(dup.id));ok('duplicate preserves image bytes with independent file references');
  await request('/library','PUT',{items:[{id:'lib'}]});assert.equal((await request('/library')).data.items[0].id,'lib');await request('/auth/preferences','PUT',{theme:'dark',language:'en'});assert.equal((await request('/auth/preferences')).data.preferences.theme,'dark');ok('library and preferences persist in D1');
@@ -208,6 +316,40 @@ try{
  ok('archive upload and content limits preserve distinct 413 messages and codes');
  assert.equal((await request('/import/excalidash/verify','POST',form(),'bob')).data.valid,true);assert.equal((await request('/import/excalidash','POST',form(),'bob')).r.status,200);assert.equal((await request('/drawings','GET',undefined,'bob')).data.totalCount,2);assert.equal((await request('/drawings')).data.totalCount,2);ok('backup verify/import round trip preserves owners and originals');
  await request('/collections/'+c.id,'DELETE');assert.equal((await request('/drawings/'+dup.id)).data.collectionId,null);await request('/drawings/'+dup.id,'DELETE');assert.equal((await request('/drawings/'+dup.id)).r.status,404);assert.equal((await request('/files/'+dup.id+'/image1')).r.status,404);ok('collection removal unorganizes drawings; permanent deletion cleans file access');
+ const upgrade=new Miniflare(options);
+ try{
+  const [initial,migration]=migrations;
+  assert.equal(initial,'0000_thick_baron_zemo.sql');
+  await initializeDatabase(upgrade,[initial]);
+  const oldRequest=requestFor(upgrade);
+  const db=await upgrade.getD1Database('DB');
+  const index=()=>db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='drawings_collection_updated_at'").first('sql');
+  assert.equal(await index(),null);
+  const collection=(await oldRequest('/collections','POST',{name:'Legacy Collection'})).data;
+  const seeded=(await oldRequest('/drawings','POST',{name:'Legacy Drawing',collectionId:collection.id,elements:[e],preview:'<svg/>'})).data;
+  const legacyPath='/drawings/'+seeded.id;
+  const legacyElement={...e,x:42};
+  const saved=await oldRequest(legacyPath,'PUT',{version:1,elements:[legacyElement],appState:{viewBackgroundColor:'#111'}});
+  assert.equal(saved.r.status,200);
+  const before=await oldRequest(legacyPath);
+  const history=(await oldRequest(legacyPath+'/history')).data;
+  assert.equal(history.totalCount,1);
+  const snapshotPath=legacyPath+'/history/'+history.snapshots[0].id;
+  assert.match(migration??'',/^0001_.*\.sql$/,'an append-only upgrade migration is required');
+  await initializeDatabase(upgrade,[migration]);
+  assert.match(await index(),/ON `drawings` \(`collectionId`,`updatedAt`\)/i);
+  assert.deepEqual((await oldRequest(legacyPath)).data,before.data);
+  assert.deepEqual((await oldRequest('/collections')).data.map(({id,name})=>({id,name})),[{id:collection.id,name:'Legacy Collection'}]);
+  const next=await oldRequest(legacyPath,'PUT',{version:2,elements:[{...legacyElement,x:55}]});
+  assert.equal(next.r.status,200);
+  assert.equal(next.data.version,3);
+  assert.equal(next.data.collectionId,collection.id);
+  assert.deepEqual(next.data.appState,{viewBackgroundColor:'#111'});
+  assert.equal(next.data.preview,'<svg/>');
+  assert.deepEqual((await oldRequest(snapshotPath)).data.elements,[e]);
+  assert.equal((await oldRequest(legacyPath+'/history')).data.totalCount,2);
+ }finally{await upgrade.dispose()}
+ ok('0001 upgrades a seeded 0000 database without losing drawing, collection or snapshot data');
  writeFileSync('tests/adapter-results.json',JSON.stringify({passed:results.length,results},null,2));
  console.log(`${results.length} integration checks passed`);
 }finally{await mf.dispose()}

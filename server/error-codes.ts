@@ -49,6 +49,10 @@ export const API_ERROR_CODES = {
   'Image unavailable': 'IMAGE_UNAVAILABLE',
   'This feature is unavailable on this private personal Site': 'FEATURE_UNAVAILABLE',
   'Endpoint not found': 'ENDPOINT_NOT_FOUND',
+  'Invalid gzip body': 'INVALID_GZIP',
+  'Unsupported content encoding': 'UNSUPPORTED_CONTENT_ENCODING',
+  'Invalid preferences': 'INVALID_PREFERENCES',
+  'Drawing is no longer in Trash': 'DRAWING_NOT_TRASHED',
 } as const;
 
 export type ApiErrorMessage = keyof typeof API_ERROR_CODES;

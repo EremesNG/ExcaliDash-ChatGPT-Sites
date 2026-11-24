@@ -1,0 +1,1 @@
+CREATE INDEX `drawings_collection_updated_at` ON `drawings` (`collectionId`,`updatedAt`);

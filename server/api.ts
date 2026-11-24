@@ -4,6 +4,28 @@ import { API_ERROR_CODES, type ApiErrorMessage } from "./error-codes";
 // Sites adapter: original REST contracts, D1 metadata/CAS, immutable R2 scenes.
 const MAX_JSON = 16 * 1024 * 1024;
 const json = (data: unknown, status = 200) => Response.json(data, {status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+// Call only after identity, ownership, and existence checks have succeeded.
+function privateHeaders(etag:string,extra:HeadersInit={}){
+ const headers=new Headers(extra);
+ headers.set('ETag',etag);
+ headers.set('Cache-Control','private, no-cache');
+ headers.set('X-Content-Type-Options','nosniff');
+ return headers;
+}
+function matchesRequestTag(req:Request,etag:string){
+ if(req.method!=='GET'&&req.method!=='HEAD')return false;
+ const header=req.headers.get('If-None-Match');
+ return header?.trim()==='*'||(header?.match(/"[^"]*"/g)?.includes(etag)??false);
+}
+async function privateJson(req:Request,data:unknown){
+ const bytes=new TextEncoder().encode(JSON.stringify(data));
+ const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+ const etag='"'+Array.from(digest,b=>b.toString(16).padStart(2,'0')).join('')+'"';
+ const headers=privateHeaders(etag);
+ if(matchesRequestTag(req,etag))return new Response(null,{status:304,headers});
+ headers.set('Content-Type','application/json');
+ return new Response(bytes,{headers});
+}
 class HttpError extends Error { constructor(public status:number,public message:ApiErrorMessage){super(message)} }
 const assert = (value:any, status:number, message:ApiErrorMessage):void => { if(!value) throw new HttpError(status,message); };
 const uid = () => crypto.randomUUID();
@@ -51,7 +73,37 @@ async function editorStatus():Promise<EditorStatusResponse>{
 }
 const safeId = (id:string) => /^[a-zA-Z0-9_-]{1,160}$/.test(id);
 const nameOf = (v:any) => { assert(typeof v==='string' && v.trim().length>0 && v.length<=500,400,'Invalid name'); return v.trim(); };
-async function body(req:Request){ assert(Number(req.headers.get('content-length')||0)<=MAX_JSON,413,'Request too large'); const raw=await req.text(); assert(raw.length<=MAX_JSON,413,'Request too large'); try{return raw?JSON.parse(raw):{}}catch{throw new HttpError(400,'Invalid JSON')} }
+async function body(req:Request){
+ const encoding=req.headers.get('Content-Encoding')?.trim().toLowerCase()||'identity';
+ assert(encoding==='identity'||encoding==='gzip',415,'Unsupported content encoding');
+ if(encoding==='identity')assert(Number(req.headers.get('content-length')||0)<=MAX_JSON,413,'Request too large');
+ if(!req.body){
+  assert(encoding==='identity',400,'Invalid gzip body');
+  return {};
+ }
+ const stream=encoding==='gzip'?req.body.pipeThrough(new DecompressionStream('gzip')):req.body;
+ const reader=stream.getReader();
+ const decoder=new TextDecoder();
+ let size=0,raw='';
+ try{
+  while(true){
+   const {done,value}=await reader.read();
+   if(done)break;
+   size+=value.byteLength;
+   if(size>MAX_JSON){
+    // Don't drain the inflator once the decoded size crosses the limit.
+    await reader.cancel().catch(()=>undefined);
+    throw new HttpError(413,'Request too large');
+   }
+   raw+=decoder.decode(value,{stream:true});
+  }
+  raw+=decoder.decode();
+ }catch(error){
+  if(encoding==='gzip'&&!(error instanceof HttpError))throw new HttpError(400,'Invalid gzip body');
+  throw error;
+ }finally{reader.releaseLock()}
+ try{return raw?JSON.parse(raw):{}}catch{throw new HttpError(400,'Invalid JSON')}
+}
 export async function api(req:Request,env:any):Promise<Response>{
  try { return await route(req,env); } catch(e:any){
   if(!(e instanceof HttpError)) console.error('Sites API error',e);
@@ -87,14 +139,23 @@ async function route(req:Request,env:any):Promise<Response>{
  const create=async(b:any)=>{validateScene(b);const id=uid(),t=now(); await checkCollection(b.collectionId??null); const scene={elements:b.elements||[],appState:b.appState||{},files:await intern(id,b.files||{}),preview:typeof b.preview==='string'?b.preview:null};const key=`${userId}/scenes/${id}/${uid()}.json`;await bucket.put(key,JSON.stringify(scene),{httpMetadata:{contentType:'application/json'}});await run('INSERT INTO drawings(id,userId,name,collectionId,version,sceneKey,createdAt,updatedAt) VALUES(?,?,?,?,1,?,?,?)',id,userId,nameOf(b.name||'Untitled Drawing'),b.collectionId??null,key,t,t);return ownDrawing(id);};
  const save=async(d:any,b:any,replace=false)=>{validateScene(b);if(b.version!==undefined)assert(b.version===d.version,409,'VERSION_CONFLICT');const old=await readScene(d);if(b.collectionId!==undefined)await checkCollection(b.collectionId);const next={...old,...('elements'in b?{elements:b.elements}:{}),...('appState'in b?{appState:b.appState}:{}),...('preview'in b?{preview:b.preview}:{}),files:replace?b.files:{...old.files,...await intern(d.id,b.files||{})}};const key=`${userId}/scenes/${d.id}/${uid()}.json`,t=now();await bucket.put(key,JSON.stringify(next),{httpMetadata:{contentType:'application/json'}});
  // D1 batch is atomic. Snapshot insertion is guarded by the exact scene revision.
- const results=await db.batch([db.prepare('INSERT INTO snapshots(id,drawingId,version,sceneKey,createdAt) SELECT ?,id,version,sceneKey,? FROM drawings WHERE id=? AND userId=? AND version=?').bind(uid(),t,d.id,userId,d.version),db.prepare('UPDATE drawings SET name=?,collectionId=?,version=version+1,sceneKey=?,updatedAt=? WHERE id=? AND userId=? AND version=?').bind(b.name!==undefined?nameOf(b.name):d.name,b.collectionId!==undefined?b.collectionId:d.collectionId,key,t,d.id,userId,d.version)]);
- if(!results[1].meta.changes){await bucket.delete(key);throw new HttpError(409,'VERSION_CONFLICT');}return publicDrawing(await ownDrawing(d.id));};
+ const results=await db.batch([db.prepare('INSERT INTO snapshots(id,drawingId,version,sceneKey,createdAt) SELECT ?,id,version,sceneKey,? FROM drawings WHERE id=? AND userId=? AND version=?').bind(uid(),t,d.id,userId,d.version),db.prepare('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,version=version+1,sceneKey=?,updatedAt=? WHERE id=? AND userId=? AND version=?').bind(b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,key,t,d.id,userId,d.version)]);
+ if(!results[1].meta.changes){await bucket.delete(key);throw new HttpError(409,'VERSION_CONFLICT');}return ownDrawing(d.id);};
  if(p[0]==='csrf-token')return json({token:'sites-origin-validation',header:'x-csrf-token'});
  if(p[0]==='auth'){
   if(p[1]==='me')return json({user:publicUser()});
   if(p[1]==='refresh')return json({ok:true});
   if(p[1]==='logout')return json({oidcLogout:true});
-  if(p[1]==='preferences'){if(method==='PUT'){const b=await body(req);await run('UPDATE users SET preferences=? WHERE id=?',JSON.stringify({...JSON.parse(user.preferences),...b}),userId);user=await first('SELECT * FROM users WHERE id=?',userId);}return json({preferences:JSON.parse(user.preferences)});}
+  if(p[1]==='preferences'){
+   let preferences=JSON.parse(user.preferences);
+   if(method==='PUT'){
+    const b=await body(req);
+    assert(b&&typeof b==='object'&&!Array.isArray(b)&&(b.appendDroppedDrawings===undefined||typeof b.appendDroppedDrawings==='boolean'),400,'Invalid preferences');
+    preferences={...preferences,...b};
+    await run('UPDATE users SET preferences=? WHERE id=?',JSON.stringify(preferences),userId);
+   }
+   return json({preferences:{...preferences,appendDroppedDrawings:preferences?.appendDroppedDrawings===true}});
+  }
   if(p[1]==='profile'&&method==='PUT'){const b=await body(req);await run('UPDATE users SET name=? WHERE id=?',nameOf(b.name),userId);user=await first('SELECT * FROM users WHERE id=?',userId);return json({user:publicUser()});}
   throw new HttpError(409,'Authentication is managed by ChatGPT Sites');
  }
@@ -115,7 +176,13 @@ async function route(req:Request,env:any):Promise<Response>{
  }
  if(p[0]==='files'){
   if(p[1]==='config')return json({s3Enabled:false,r2Enabled:true});
-  await ownDrawing(p[1]);const f=await first('SELECT * FROM files WHERE drawingId=? AND fileId=?',p[1],p[2]);assert(f,404,'File not found');const o=await bucket.get(f.objectKey);assert(o,404,'File not found');return new Response(o.body,{headers:{'Content-Type':f.mimeType,'Content-Disposition':'attachment','Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox"}});
+  await ownDrawing(p[1]);const f=await first('SELECT * FROM files WHERE drawingId=? AND fileId=?',p[1],p[2]);assert(f,404,'File not found');const o=await bucket.get(f.objectKey);assert(o,404,'File not found');
+  const headers=privateHeaders(o.httpEtag,{'Content-Type':f.mimeType,'Content-Disposition':'attachment','Content-Security-Policy':"default-src 'none'; sandbox"});
+  if(matchesRequestTag(req,o.httpEtag)){
+   await o.body.cancel();
+   return new Response(null,{status:304,headers});
+  }
+  return new Response(o.body,{headers});
  }
  if(p[0]==='export'&&p[1]==='excalidash'&&method==='GET'){
   const zip=new JSZip(),ds=await all('SELECT * FROM drawings WHERE userId=?',userId),cs=await all('SELECT * FROM collections WHERE userId=?',userId),manifest:any={format:'excalidash',formatVersion:1,exportedAt:now(),excalidashBackendVersion:'sites',userId,unorganizedFolder:'Unorganized',collections:cs.map((c:any)=>({...c,folder:c.id})),drawings:[]};
@@ -144,18 +211,62 @@ async function route(req:Request,env:any):Promise<Response>{
     if(method==='POST'){const b=await body(req);assert(['element-update','cursor-move','user-activity'].includes(b.event),400,'Invalid event');assert(JSON.stringify(b.payload).length<1024*1024,413,'Event too large');await db.batch([db.prepare('DELETE FROM events WHERE drawingId=? AND createdAt<?').bind(d.id,Date.now()-60000),db.prepare('INSERT INTO events(drawingId,sessionId,event,payload,createdAt) VALUES(?,?,?,?,?)').bind(d.id,session,b.event,JSON.stringify({...b.payload,userId:session,drawingId:d.id,username:user.name}),Date.now())]);return json({ok:true});}
   }
   if(p[2]==='files'&&p[3]&&method==='PUT'){assert(safeId(p[3]),400,'Invalid file ID');const mime=req.headers.get('content-type')?.split(';')[0]||'';assert(/^image\/(png|jpeg|webp|gif|svg\+xml|avif)$/.test(mime),400,'Invalid image type');const bytes=await req.arrayBuffer();assert(bytes.byteLength<=10*1024*1024,413,'Image too large');const key=`${userId}/files/${d.id}/${p[3]}`;const existing=await first('SELECT fileId FROM files WHERE drawingId=? AND fileId=?',d.id,p[3]);if(!existing){await bucket.put(key,bytes,{httpMetadata:{contentType:mime}});await run('INSERT OR IGNORE INTO files(drawingId,fileId,objectKey,mimeType,size) VALUES(?,?,?,?,?)',d.id,p[3],key,mime,bytes.byteLength);}return json({url:fileUrl(d.id,p[3])});}
-  if(p[2]==='preview')return json({preview:(await readScene(d)).preview||null});
+  if(p[2]==='preview'){const preview={preview:(await readScene(d)).preview??null,updatedAt:Date.parse(d.updatedAt)};return method==='GET'?privateJson(req,preview):json(preview);}
   if(p[2]==='history'){
-    if(!p[3]){const rows=await all('SELECT id,version,createdAt FROM snapshots WHERE drawingId=? ORDER BY version DESC',d.id);const offset=Number(url.searchParams.get('offset'))||0,limit=Math.min(100,Number(url.searchParams.get('limit'))||50);return json({snapshots:rows.slice(offset,offset+limit),totalCount:rows.length});}
-    const s=await first('SELECT * FROM snapshots WHERE id=? AND drawingId=?',p[3],d.id);assert(s,404,'Snapshot not found');const scene=await readScene(s);if(p[4]==='restore'&&method==='POST'){const restored=await save(d,{...scene},true);await run('INSERT INTO events(drawingId,sessionId,event,payload,createdAt) VALUES(?,?,?,?,?)',d.id,'server','drawing-server-update',JSON.stringify({drawingId:d.id}),Date.now());return json(restored);}return json({...s,sceneKey:undefined,...scene});
+    if(!p[3]){const rows=await all('SELECT id,version,createdAt FROM snapshots WHERE drawingId=? ORDER BY version DESC',d.id);const offset=Number(url.searchParams.get('offset'))||0,limit=Math.min(100,Number(url.searchParams.get('limit'))||50);return json({snapshots:rows.slice(offset,offset+limit),totalCount:rows.length,retentionDays:null});}
+    const s=await first('SELECT * FROM snapshots WHERE id=? AND drawingId=?',p[3],d.id);assert(s,404,'Snapshot not found');const scene=await readScene(s);if(p[4]==='restore'&&method==='POST'){const restored=await publicDrawing(await save(d,{...scene},true));await run('INSERT INTO events(drawingId,sessionId,event,payload,createdAt) VALUES(?,?,?,?,?)',d.id,'server','drawing-server-update',JSON.stringify({drawingId:d.id}),Date.now());return json(restored);}return json({...s,sceneKey:undefined,...scene});
   }
   if(p[2]==='duplicate'&&method==='POST'){const scene=await readScene(d);const embedded:any={};for(const [fid,f]of Object.entries(scene.files) as any){const record=await first('SELECT * FROM files WHERE drawingId=? AND fileId=?',d.id,fid);assert(record,500,'Image unavailable');const obj=await bucket.get(record.objectKey);assert(obj,500,'Image unavailable');embedded[fid]={...f,dataURL:await toDataURL(obj,record.mimeType)};}return json(await publicDrawing(await create({...scene,files:embedded,name:d.name+' (copy)',collectionId:d.collectionId})));}
   if(p[2]==='permissions'&&method==='GET')return json({permissions:[],linkShares:[]});
   if(p[2]==='share-resolve')return json({users:[]});
   assert(!p[2],409,'This feature is unavailable on this private personal Site');
-  if(method==='GET')return json(await publicDrawing(d));
-  if(method==='PUT')return json(await save(d,await body(req)));
-  if(method==='DELETE'){const fileRows=await all('SELECT objectKey FROM files WHERE drawingId=?',d.id),history=await all('SELECT sceneKey FROM snapshots WHERE drawingId=?',d.id);await db.batch(['files','snapshots','events'].map(t=>db.prepare(`DELETE FROM ${t} WHERE drawingId=?`).bind(d.id)).concat([db.prepare('DELETE FROM drawings WHERE id=? AND userId=?').bind(d.id,userId)]));await Promise.all([d.sceneKey,...fileRows.map((f:any)=>f.objectKey),...history.map((s:any)=>s.sceneKey)].map(k=>bucket.delete(k)));return json({success:true});}
+  if(method==='GET'){
+   const drawing=await publicDrawing(d);
+   const omitPreview=url.searchParams.get('omitPreview');
+   if(omitPreview==='1'||omitPreview==='true'){
+    const {preview,...rest}=drawing;
+    return privateJson(req,{...rest,hasPreview:typeof preview==='string'&&preview.length>0});
+   }
+   return privateJson(req,drawing);
+  }
+  if(method==='PUT'){
+   const b=await body(req);
+   let updated;
+   // Metadata-only saves keep the scene revision. Scene writes update only explicitly supplied metadata.
+   if((b?.name!==undefined||b?.collectionId!==undefined)&&!('elements'in b||'appState'in b||'files'in b||'preview'in b)){
+    if(b.version!==undefined)assert(b.version===d.version,409,'VERSION_CONFLICT');
+    if(b.collectionId!==undefined)await checkCollection(b.collectionId);
+    const result=await run('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,updatedAt=? WHERE id=? AND userId=? AND version=?',b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,now(),d.id,userId,d.version);
+    assert(result.meta.changes,409,'VERSION_CONFLICT');
+    updated=await ownDrawing(d.id);
+   }else updated=await save(d,b);
+   if(/(?:^|[,;\s])return=minimal(?:$|[,;\s])/i.test(req.headers.get('Prefer')||'')){
+    const {id,name,version,userId,collectionId,createdAt,updatedAt}=updated;
+    return json({id,name,version,userId,collectionId,createdAt,updatedAt,accessLevel:'owner'});
+   }
+   return json(await publicDrawing(updated));
+  }
+  if(method==='DELETE'){
+   const requireTrashed=url.searchParams.get('requireTrashed')==='1';
+   const guard=`id=? AND userId=?${requireTrashed?" AND collectionId='trash'":''}`;
+   // Guard every dependent delete in the same transaction, before deleting the drawing row.
+   const dependent=(table:string,returning='')=>db.prepare(`DELETE FROM ${table} WHERE drawingId=? AND EXISTS (SELECT 1 FROM drawings WHERE ${guard})${returning}`).bind(d.id,d.id,userId);
+   const [files,history,,deleted,remaining]=await db.batch([
+    dependent('files',' RETURNING objectKey'),
+    dependent('snapshots',' RETURNING sceneKey'),
+    dependent('events'),
+    db.prepare(`DELETE FROM drawings WHERE ${guard} RETURNING sceneKey`).bind(d.id,userId),
+    db.prepare('SELECT id FROM drawings WHERE id=? AND userId=?').bind(d.id,userId),
+   ]);
+   if(!deleted.results.length){
+    if(!requireTrashed)return json({success:true});
+    if(remaining.results.length)throw new HttpError(409,'Drawing is no longer in Trash');
+    throw new HttpError(404,'Drawing not found');
+   }
+   const keys=[deleted.results[0].sceneKey,...files.results.map((row:{objectKey:string})=>row.objectKey),...history.results.map((row:{sceneKey:string})=>row.sceneKey)];
+   await Promise.all(keys.map(key=>bucket.delete(key)));
+   return json({success:true});
+  }
  }
  throw new HttpError(404,'Endpoint not found');
 }
