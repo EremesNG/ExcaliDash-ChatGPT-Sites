@@ -66,7 +66,28 @@ const errorContract=[
 const require=createRequire(import.meta.url),wr=createRequire(require.resolve('wrangler/package.json'));
 const {Miniflare}=wr('miniflare');
 mkdirSync('.sites-runtime/tests',{recursive:true});
-await build({stdin:{contents:`import {api} from './server/api.ts'; export default {fetch:api}`,resolveDir:process.cwd()},bundle:true,format:'esm',platform:'browser',target:'es2022',define:{'import.meta.env.DEV':'false'},outfile:'.sites-runtime/tests/api.js'});
+const workerEntry=`
+ import {api} from './server/api.ts';
+ export default {fetch(request,env){
+  if(!request.headers.has('x-test-interleave-save'))return api(request,env);
+  const DB={
+   prepare:env.DB.prepare.bind(env.DB),
+   async batch(statements){
+    const results=await env.DB.batch(statements);
+    // Complete a real peer PUT after D1 commits, before the first handler resumes.
+    const peer=await api(new Request(request.url,{
+     method:'PUT',
+     headers:{'oai-authenticated-user-id':request.headers.get('oai-authenticated-user-id'),'Content-Type':'application/json'},
+     body:JSON.stringify({version:2,elements:[{id:'peer'}],preview:'<svg id="peer"/>'}),
+    }),env);
+    if(!peer.ok|| (await peer.json()).version!==3)throw new Error('Peer PUT did not commit revision 3');
+    return results;
+   },
+  };
+  return api(request,{...env,DB});
+ }};
+`;
+await build({stdin:{contents:workerEntry,resolveDir:process.cwd()},bundle:true,format:'esm',platform:'browser',target:'es2022',define:{'import.meta.env.DEV':'false'},outfile:'.sites-runtime/tests/api.js'});
 const options={modules:true,scriptPath:'.sites-runtime/tests/api.js',compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'test-db'},r2Buckets:['BUCKET']};
 const mf=new Miniflare(options);
 const results=[];
@@ -285,6 +306,24 @@ try{
  assert.equal((await request(savePath+'/history')).data.retentionDays,null);
  assert.equal((await request(savePath,'DELETE')).r.status,200);
  ok('minimal gzip saves preserve authorization and CAS; invalid encodings and inflated byte limits are enforced; history reports unlimited retention');
+
+ for(const [label,changes,minimal] of [
+  ['scene',{elements:[{id:'first'}]},false],
+  ['preview',{preview:'<svg id="first"/>'},true],
+  ['metadata',{name:'Renamed'},false],
+ ]){
+  const fixture=(await request('/drawings','POST',{name:'Interleaved save',elements:[{id:'original'}]})).data;
+  const path='/drawings/'+fixture.id;
+  const saved=await request(path,'PUT',{version:1,...changes},'alice',{'x-test-interleave-save':'1',...(minimal?{Prefer:'return=minimal'}:{})});
+  assert.equal(saved.r.status,200);
+  assert.equal((await request(path)).data.version,3,`${label}: peer committed before the response`);
+  assert.equal(saved.data.version,2,`${label}: PUT must acknowledge its own committed revision`);
+  if(minimal)assert.equal('elements'in saved.data,false);
+  else assert.deepEqual(saved.data.elements,changes.elements??fixture.elements);
+  assert.equal(saved.data.name,changes.name??fixture.name);
+  await request(path,'DELETE');
+ }
+ ok('scene, preview and metadata PUTs acknowledge their own revisions despite an interleaved peer save');
 
  assert.equal((await request('/auth/preferences')).data.preferences.appendDroppedDrawings,false);
  const setPreference=await request('/auth/preferences','PUT',compressed({appendDroppedDrawings:true}),'alice',compressedHeaders);

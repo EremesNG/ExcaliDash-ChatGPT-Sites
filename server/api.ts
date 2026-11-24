@@ -138,9 +138,10 @@ async function route(req:Request,env:any):Promise<Response>{
  const validateScene=(b:any)=>{if('elements'in b)assert(Array.isArray(b.elements)&&b.elements.every((e:any)=>e&&typeof e.id==='string'),400,'Invalid elements');if('appState'in b)assert(b.appState&&typeof b.appState==='object'&&!Array.isArray(b.appState),400,'Invalid appState');};
  const create=async(b:any)=>{validateScene(b);const id=uid(),t=now(); await checkCollection(b.collectionId??null); const scene={elements:b.elements||[],appState:b.appState||{},files:await intern(id,b.files||{}),preview:typeof b.preview==='string'?b.preview:null};const key=`${userId}/scenes/${id}/${uid()}.json`;await bucket.put(key,JSON.stringify(scene),{httpMetadata:{contentType:'application/json'}});await run('INSERT INTO drawings(id,userId,name,collectionId,version,sceneKey,createdAt,updatedAt) VALUES(?,?,?,?,1,?,?,?)',id,userId,nameOf(b.name||'Untitled Drawing'),b.collectionId??null,key,t,t);return ownDrawing(id);};
  const save=async(d:any,b:any,replace=false)=>{validateScene(b);if(b.version!==undefined)assert(b.version===d.version,409,'VERSION_CONFLICT');const old=await readScene(d);if(b.collectionId!==undefined)await checkCollection(b.collectionId);const next={...old,...('elements'in b?{elements:b.elements}:{}),...('appState'in b?{appState:b.appState}:{}),...('preview'in b?{preview:b.preview}:{}),files:replace?b.files:{...old.files,...await intern(d.id,b.files||{})}};const key=`${userId}/scenes/${d.id}/${uid()}.json`,t=now();await bucket.put(key,JSON.stringify(next),{httpMetadata:{contentType:'application/json'}});
- // D1 batch is atomic. Snapshot insertion is guarded by the exact scene revision.
- const results=await db.batch([db.prepare('INSERT INTO snapshots(id,drawingId,version,sceneKey,createdAt) SELECT ?,id,version,sceneKey,? FROM drawings WHERE id=? AND userId=? AND version=?').bind(uid(),t,d.id,userId,d.version),db.prepare('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,version=version+1,sceneKey=?,updatedAt=? WHERE id=? AND userId=? AND version=?').bind(b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,key,t,d.id,userId,d.version)]);
- if(!results[1].meta.changes){await bucket.delete(key);throw new HttpError(409,'VERSION_CONFLICT');}return ownDrawing(d.id);};
+ // Snapshot the guarded revision and return the row this batch wrote, not a later writer's row.
+ const [,write]=await db.batch([db.prepare('INSERT INTO snapshots(id,drawingId,version,sceneKey,createdAt) SELECT ?,id,version,sceneKey,? FROM drawings WHERE id=? AND userId=? AND version=?').bind(uid(),t,d.id,userId,d.version),db.prepare('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,version=version+1,sceneKey=?,updatedAt=? WHERE id=? AND userId=? AND version=? RETURNING *').bind(b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,key,t,d.id,userId,d.version)]);
+ const updated=write.results[0];
+ if(!updated){await bucket.delete(key);throw new HttpError(409,'VERSION_CONFLICT');}return updated;};
  if(p[0]==='csrf-token')return json({token:'sites-origin-validation',header:'x-csrf-token'});
  if(p[0]==='auth'){
   if(p[1]==='me')return json({user:publicUser()});
@@ -236,7 +237,8 @@ async function route(req:Request,env:any):Promise<Response>{
    if((b?.name!==undefined||b?.collectionId!==undefined)&&!('elements'in b||'appState'in b||'files'in b||'preview'in b)){
     if(b.version!==undefined)assert(b.version===d.version,409,'VERSION_CONFLICT');
     if(b.collectionId!==undefined)await checkCollection(b.collectionId);
-    updated=await first('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,version=version+1,updatedAt=? WHERE id=? AND userId=? AND version=? RETURNING *',b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,now(),d.id,userId,d.version);
+    const [write]=await db.batch([db.prepare('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,version=version+1,updatedAt=? WHERE id=? AND userId=? AND version=? RETURNING *').bind(b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,now(),d.id,userId,d.version)]);
+    updated=write.results[0];
     assert(updated,409,'VERSION_CONFLICT');
    }else updated=await save(d,b);
    if(/(?:^|[,;\s])return=minimal(?:$|[,;\s])/i.test(req.headers.get('Prefer')||'')){
