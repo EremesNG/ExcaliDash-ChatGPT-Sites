@@ -78,7 +78,7 @@ afterEach(() => {
 const advancedProps = {
   authEnabled: true, authMode: "oidc_enforced", authToggleLoading: false,
   backupImportLoading: false, legacyDbImportLoading: false, isManagedAuthMode: true,
-  user: { role: "ADMIN" }, appVersion: "0.6.7", buildLabel: "ChatGPT Sites · personal",
+  user: { role: "ADMIN" }, appVersion: "0.7.0", buildLabel: "ChatGPT Sites · personal",
   verifyBackupFile: vi.fn(), verifyLegacyDbFile: vi.fn(), confirmToggleAuthEnabled: vi.fn(),
   setImportError: vi.fn(), setImportSuccess: vi.fn(),
 };
@@ -172,7 +172,7 @@ describe("Settings dialogs and failures in Spanish", () => {
     [undefined, { exportedAt: "not-a-date" }, "Unknown date"],
   ] as const)("shows a localized fallback in %s for backup date metadata %j", async (language, dateMetadata, expected) => {
     // Verification accepts metadata without exportedAt despite the declared response type.
-    const info = { formatVersion: 1, excalidashBackendVersion: "0.6.7", collections: 1, drawings: 2,
+    const info = { formatVersion: 1, excalidashBackendVersion: "0.7.0", collections: 1, drawings: 2,
       ...dateMetadata,
     } as NonNullable<typeof modalProps.backupImportConfirmation.info>;
     const modal = <SettingsConfirmModals {...modalProps} backupImportConfirmation={{ isOpen: true, file: null, info }} />;
@@ -186,7 +186,7 @@ describe("Settings dialogs and failures in Spanish", () => {
     "pluralizes %s collections and %s drawings and formats the backup export date", async (collections, drawings, expected) => {
       vi.stubEnv("TZ", "UTC");
       await mount(<SettingsConfirmModals {...modalProps} backupImportConfirmation={{ isOpen: true, file: null,
-        info: { formatVersion: 1, exportedAt: "2026-10-27T10:20:00Z", excalidashBackendVersion: "0.6.7", collections: Number(collections), drawings: Number(drawings) },
+        info: { formatVersion: 1, exportedAt: "2026-10-27T10:20:00Z", excalidashBackendVersion: "0.7.0", collections: Number(collections), drawings: Number(drawings) },
       }} />);
       const text = textOf(renderer!.root);
       expect(text).toContain("¿Importar copia de seguridad?");

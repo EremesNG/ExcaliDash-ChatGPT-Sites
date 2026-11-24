@@ -55,7 +55,7 @@ const baseProps = {
   legacyDbImportLoading: false,
   isManagedAuthMode: true,
   user: { role: "ADMIN" } as { role?: string } | null,
-  appVersion: "0.6.7",
+  appVersion: "0.7.0",
   buildLabel: "ChatGPT Sites · personal" as string | undefined,
   verifyBackupFile: vi.fn(),
   verifyLegacyDbFile: vi.fn(),
@@ -313,6 +313,6 @@ describe("Advanced settings — version row", () => {
     await mount();
     const text = textOf(row("Version"));
     expect(text).toContain("ChatGPT Sites · personal");
-    expect(text).toContain("0.6.7");
+    expect(text).toContain("0.7.0");
   });
 });

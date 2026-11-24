@@ -1,7 +1,7 @@
 # Adaptación y verificación
 
-Base actual: ZimengXiong/ExcaliDash 0.6.7, commit 0f9be2d8649be7650e6bee2844739c584fa76c35. Adaptación inicial realizada sobre 0.6.6.
-El inventario inicial de los 526 archivos está en upstream-inventory.json.
+Base actual: ZimengXiong/ExcaliDash 0.7.0, commit `b692be20aea76519c19e9874d95163887066f036`. Adaptación inicial realizada sobre 0.6.6.
+El [inventario del tag](upstream-inventory.json) registra los 574 archivos originales. Las [notas de 0.7.0](upstream-release-0.7.0.md) distinguen los cambios adaptados a Sites de los que se conservan solo como referencia.
 En la adaptación inicial se reutilizaron sin cambios 127 de los 135 archivos
 originales de frontend/src; se añadieron el transporte Sites y el backend de Workers.
 upstream-backend y upstream-docs conservan las referencias originales y sus pruebas.
@@ -98,7 +98,7 @@ de producto.
 El editor se fija exactamente a `@excalidraw/excalidraw@0.18.0-3c916c5`, build de
 excalidraw.com del 4 de noviembre de 2026, commit
 `3c916c58bd219157a3486960f865174468f86eff` de la rama `release`, canal npm `next`.
-Este pin es independiente del editor 0.18.1 de ExcaliDash 0.6.7. Incluye notas
+Este pin es independiente del rango `^0.18.1` de ExcaliDash 0.7.0. Incluye notas
 adhesivas, Bucket Fill y selección con lazo; React permanece en 18.3.1. El conversor
 Mermaid pasa a 3.6.0 como dependencia del editor.
 

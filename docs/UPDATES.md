@@ -109,6 +109,25 @@ El editor se actualiza por separado de ExcaliDash. El pin actual es
 8. Mantener los bumps del editor separados de las actualizaciones de ExcaliDash:
    un cambio revisado por cada bump, con pin exacto y procedencia actualizada.
 
+## 0.7.0 — 22 de noviembre de 2026
+
+Tag: `v0.7.0`. Commit: `b692be20aea76519c19e9874d95163887066f036`.
+Base previa: `v0.6.7`, `0f9be2d8649be7650e6bee2844739c584fa76c35`.
+
+La sincronización integra las mejoras del dashboard y del editor sobre el
+frontend de Sites, con sus traducciones y transporte HTTP. El Worker adapta
+las lecturas condicionales, el guardado compacto y con gzip, el indicador de
+retención del historial y la preferencia de añadir dibujos al soltarlos. La
+migración D1 añade un índice para consultar dibujos por colección y fecha de
+actualización; no modifica los datos existentes. El editor mantiene su pin
+independiente.
+
+`VERSION` y `upstream.json` identifican la misma versión. `upstream-backend/` y
+`upstream-docs/` conservan el código y los documentos originales como referencia,
+con la exclusión habitual de los cuatro ejemplos `.env*.example` del backend.
+Consulta las [notas de 0.7.0](upstream-release-0.7.0.md) para ver qué se adapta y
+qué no se ejecuta en Sites.
+
 ## 0.6.7 — 30 de octubre de 2026
 
 Tag: v0.6.7. Commit: 0f9be2d8649be7650e6bee2844739c584fa76c35.
