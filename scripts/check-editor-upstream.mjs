@@ -5,7 +5,8 @@ import { parseArgs } from 'node:util';
 
 const defaultRoot = fileURLToPath(new URL('../', import.meta.url));
 const npmTagsUrl = 'https://registry.npmjs.org/-/package/@excalidraw/excalidraw/dist-tags';
-const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const pinnedVersion = /^\d+\.\d+\.\d+-([0-9a-f]{7,40})$/i;
+const productionBuild = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)-([0-9a-f]{7,40})$/i;
 
 function checkConsistency(root) {
   const problems = [];
@@ -29,13 +30,30 @@ function checkConsistency(root) {
   if (!editor || typeof editor !== 'object' || Array.isArray(editor)) {
     problems.push('upstream.json: missing editor provenance block.');
   } else {
-    for (const field of ['package', 'version', 'integrity']) {
+    for (const field of ['package', 'integrity']) {
       if (typeof editor[field] !== 'string' || !editor[field].trim()) {
         problems.push(`upstream.json: editor.${field} must be a non-empty string.`);
       }
     }
-    if (typeof editor.version === 'string' && !exactVersion.test(editor.version)) {
-      problems.push('upstream.json: editor.version must be an exact version, not a range.');
+    const short = typeof editor.version === 'string' && pinnedVersion.exec(editor.version)?.[1];
+    if (!short) {
+      problems.push('upstream.json: editor.version must be an exact prerelease of the form <major>.<minor>.<patch>-<commit hash prefix>.');
+    }
+    if (typeof editor.commit !== 'string' || !/^[0-9a-f]{40}$/i.test(editor.commit)) {
+      problems.push('upstream.json: editor.commit must be a 40-character hexadecimal SHA.');
+    } else if (short && !editor.commit.startsWith(short)) {
+      problems.push('upstream.json: editor.commit must start with the editor.version hash suffix.');
+    }
+    const build = typeof editor.productionVersion === 'string' && productionBuild.exec(editor.productionVersion);
+    if (!build || !Number.isFinite(Date.parse(build[1]))) {
+      problems.push('upstream.json: editor.productionVersion must be <ISO timestamp>-<commit hash prefix>.');
+    } else {
+      if (short && build[2] !== short) {
+        problems.push('upstream.json: editor.productionVersion must end with the editor.version hash suffix.');
+      }
+      if (build[1] !== editor.releasedAt) {
+        problems.push('upstream.json: editor.productionVersion timestamp must match editor.releasedAt.');
+      }
     }
     if (typeof editor.package === 'string' && editor.package.trim()) {
       const lockPath = `node_modules/${editor.package}`;
@@ -73,7 +91,7 @@ async function reportProduction(editor) {
   try {
     const data = await fetchData(editor.productionVersionUrl);
     const build = typeof data === 'string' ? data : data?.version;
-    const parsed = typeof build === 'string' && /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)-([0-9a-f]{7,40})$/i.exec(build);
+    const parsed = typeof build === 'string' && productionBuild.exec(build);
     if (!parsed || !Number.isFinite(Date.parse(parsed[1]))) {
       throw new Error('invalid build id; expected <ISO timestamp>-<short hash>');
     }

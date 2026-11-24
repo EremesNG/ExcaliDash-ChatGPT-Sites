@@ -188,6 +188,8 @@ const makeHarness = () => {
 const makeBroadcastHarness = () => {
   const socket = { emit: vi.fn() };
   const save = vi.fn();
+  const savePreview = vi.fn();
+  const markSceneChanged = vi.fn();
   const lastOrder = ref<readonly string[] | null>(null);
   let tracking!: ReturnType<typeof useEditorElementTracking>;
   let broadcast!: ReturnType<typeof useEditorBroadcast>;
@@ -205,8 +207,8 @@ const makeBroadcastHarness = () => {
       socketRef: ref(socket),
       uploadedRefs: ref({}),
       debouncedSave: save,
-      debouncedSavePreview: vi.fn(),
-      markSceneChanged: vi.fn(),
+      debouncedSavePreview: savePreview,
+      markSceneChanged,
     });
     useLayoutEffect(() => {
       tracking = nextTracking;
@@ -218,11 +220,13 @@ const makeBroadcastHarness = () => {
     Harness,
     socket,
     save,
+    savePreview,
+    markSceneChanged,
     record: (original: any) => {
       tracking.recordElementVersion(original);
       lastOrder.current = getElementOrder([original]);
     },
-    broadcast: (next: any) => broadcast.broadcastChanges([next], {}),
+    broadcast: (next: any, files = {}) => broadcast.broadcastChanges([next], files),
   };
 };
 beforeEach(() => {
@@ -309,6 +313,42 @@ describe("outgoing element changes", () => {
     h.setLive([edited]);
     await act(async () => change([edited], {}, {}));
     expect(broadcast).toHaveBeenCalledWith([edited], {});
+  });
+  it("ignores repeated frames with the same effective image status but broadcasts status changes", async () => {
+    const h = makeBroadcastHarness();
+    await mount(h.Harness);
+    const image = element("local", 1, {
+      type: "image",
+      fileId: "file",
+      status: "pending",
+    });
+    const files = { file: { dataURL: "data:image/png;base64,AA==" } };
+    await act(async () => h.broadcast(image, files));
+    expect(h.socket.emit).toHaveBeenLastCalledWith(
+      "element-update",
+      expect.objectContaining({ elements: [{ ...image, status: "saved" }] }),
+    );
+
+    for (let frame = 0; frame < 2; frame++) {
+      vi.advanceTimersByTime(100);
+      await act(async () => h.broadcast({ ...image }, { ...files }));
+    }
+    expect(h.socket.emit).toHaveBeenCalledTimes(1);
+    expect(h.save).toHaveBeenCalledTimes(1);
+    expect(h.savePreview).toHaveBeenCalledTimes(1);
+    expect(h.markSceneChanged).toHaveBeenCalledTimes(1);
+
+    // Without the file, the same element is effectively pending again.
+    vi.advanceTimersByTime(100);
+    await act(async () => h.broadcast(image));
+    expect(h.socket.emit).toHaveBeenCalledTimes(2);
+    expect(h.socket.emit).toHaveBeenLastCalledWith(
+      "element-update",
+      expect.objectContaining({ elements: [image], files: undefined }),
+    );
+    expect(h.save).toHaveBeenCalledTimes(2);
+    expect(h.savePreview).toHaveBeenCalledTimes(2);
+    expect(h.markSceneChanged).toHaveBeenCalledTimes(2);
   });
   it("ignores object key order and absent optional JSON properties", async () => {
     const h = makeBroadcastHarness();

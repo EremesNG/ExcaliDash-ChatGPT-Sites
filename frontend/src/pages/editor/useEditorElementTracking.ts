@@ -27,7 +27,7 @@ export const useEditorElementTracking = () => {
     });
   }, []);
 
-  const hasElementChanged = useCallback((element: any, _status?: unknown) => {
+  const hasElementChanged = useCallback((element: any) => {
     const previous = elementVersionMap.current.get(element.id);
     if (!previous) return true;
     const nextVersion = element.version ?? 0;

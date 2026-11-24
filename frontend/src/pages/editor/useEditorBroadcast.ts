@@ -4,7 +4,7 @@ import {
   applyUploadedFileRefs,
   getElementOrder,
   getFilesDelta,
-  getImageElementStatus,
+  withSavedImageStatus,
 } from "./shared";
 import type { UploadedFileRefs } from "./shared";
 
@@ -25,7 +25,7 @@ type UseEditorBroadcastParams = {
     files?: Record<string, any>,
   ) => void;
   debouncedSavePreview: (drawingId: string) => void;
-  hasElementChanged: (element: any, status?: unknown) => boolean;
+  hasElementChanged: (element: any) => boolean;
   recordElementVersion: (element: any) => void;
   markSceneChanged: () => void;
 };
@@ -68,10 +68,8 @@ export const useEditorBroadcast = ({
           }
           orderIndex += 1;
         }
-        const status = getImageElementStatus(element, nextFiles);
-        if (hasElementChanged(element, status)) {
-          const change =
-            status === element.status ? element : { ...element, status };
+        const change = withSavedImageStatus(element, nextFiles);
+        if (hasElementChanged(change)) {
           changes.push(change);
           recordElementVersion(change);
         }

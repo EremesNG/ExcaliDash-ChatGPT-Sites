@@ -11,7 +11,7 @@ Upstream: [ZimengXiong/ExcaliDash v0.7.0](https://github.com/ZimengXiong/ExcaliD
 
 ## Adapted for Sites
 
-- Merge applicable dashboard and editor improvements onto the Sites frontend, retaining English and Spanish localization, managed identity and HTTP collaboration. Follow mode uses the existing Sites transport; the Excalidraw package remains independently pinned.
+- Merge applicable dashboard and editor improvements onto the Sites frontend, retaining English and Spanish localization, managed identity and HTTP collaboration. Collaboration follow mode is excluded because the Sites transport and Worker event allowlist do not support `visible-bounds`. The Excalidraw package remains independently pinned.
 - Drawing GET supports `omitPreview=1` with `hasPreview`. Drawing, preview and file reads check identity and ownership before evaluating `If-None-Match`; a matching strong, representation-specific ETag returns a bodyless `304`. Responses use `Cache-Control: private, no-cache`. The frontend scopes caches by account, clears them on identity changes and discards late responses for the previous account.
 - Drawing PUT accepts gzip JSON up to 16 MiB after decompression and honors `Prefer: return=minimal`, without changing optimistic version checks.
 - History lists report `retentionDays: null` (unlimited); Sites does not add a history pruning job. The account preference `appendDroppedDrawings` persists per user.

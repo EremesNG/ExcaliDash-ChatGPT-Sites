@@ -197,6 +197,26 @@ try{
  apiError(await request('/collections/'+c.id+'/shares','POST',{}),'SITE_PRIVATE');
  apiError(await request('/drawings/'+d.id+'/share','POST',{}),'FEATURE_UNAVAILABLE');
  ok('private sharing and unsupported features retain their 409 errors with distinct codes');
+ const renameFixture=(await request('/drawings','POST',{name:'Before rename',elements:[{id:'original'}]})).data;
+ const renamePath='/drawings/'+renameFixture.id;
+ const renameVersion=renameFixture.version;
+ const renamed=await request(renamePath,'PUT',{version:renameVersion,name:'First rename'});
+ assert.equal(renamed.r.status,200);
+ apiError(await request(renamePath,'PUT',{version:renameVersion,name:'Competing rename'}),'VERSION_CONFLICT');
+ assert.equal(renamed.data.version,renameVersion+1);
+ assert.deepEqual(renamed.data.elements,[{id:'original'}]);
+ apiError(await request(renamePath,'PUT',{version:renameVersion,elements:[{id:'stale save'}]}),'VERSION_CONFLICT');
+ const afterRename=(await request(renamePath)).data;
+ assert.equal(afterRename.name,'First rename');
+ assert.equal(afterRename.version,renamed.data.version);
+ assert.deepEqual(afterRename.elements,renamed.data.elements);
+ const renamedMinimal=await request(renamePath,'PUT',{version:afterRename.version,name:'Minimal rename'},'alice',{Prefer:'return=minimal'});
+ assert.equal(renamedMinimal.r.status,200);
+ assert.equal(renamedMinimal.data.name,'Minimal rename');
+ assert.equal(renamedMinimal.data.version,afterRename.version+1);
+ assert.equal(Object.hasOwn(renamedMinimal.data,'elements'),false);
+ assert.equal((await request(renamePath,'DELETE')).r.status,200);
+ ok('metadata-only renames advance the version in full and minimal responses and reject stale renames and scene saves');
  const metadataCollection=(await request('/collections','POST',{name:'Temporary'})).data;
  const cacheFixture=(await request('/drawings','POST',{name:'Cache',collectionId:metadataCollection.id,preview:'<svg/>'})).data;
  const cachePath='/drawings/'+cacheFixture.id;
@@ -238,7 +258,7 @@ try{
   const next=await request(cachePath,'GET',undefined,'alice',{'If-None-Match':previous.r.headers.get('etag')});
   assert.equal(next.r.status,200);
   assert.equal(next.data[key],expected);
-  assert.equal(next.data.version,full.data.version);
+  assert.equal(next.data.version,previous.data.version+(key==='name'?1:0));
   assert.notEqual(next.r.headers.get('etag'),previous.r.headers.get('etag'));
   previous=next;
  }

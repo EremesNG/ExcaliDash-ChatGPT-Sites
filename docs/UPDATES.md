@@ -36,8 +36,11 @@ El editor se actualiza por separado de ExcaliDash. El pin actual es
    ```
 
    El identificador de producción tiene formato `<fecha ISO>-<hash>`. El script
-   comprueba primero la consistencia local entre `upstream.json`,
-   `frontend/package.json` y `frontend/package-lock.json` (código 1 si difieren).
+   comprueba que el hash de la versión fijada sea un prefijo del SHA completo en
+   `commit` y coincida con el sufijo de `productionVersion`, cuya fecha debe ser
+   igual a `releasedAt`. También contrasta la versión con `frontend/package.json`
+   y `frontend/package-lock.json`, y la integridad con el lockfile.
+   Si falla alguna comprobación local, devuelve el código 1.
    Después informa de excalidraw.com y npm `next`; la deriva o un fallo de red son
    informativos y no cambian el código 0. `--offline` omite ambas consultas;
    `--root <dir>` permite comprobar otra copia del repositorio.

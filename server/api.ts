@@ -232,13 +232,12 @@ async function route(req:Request,env:any):Promise<Response>{
   if(method==='PUT'){
    const b=await body(req);
    let updated;
-   // Metadata-only saves keep the scene revision. Scene writes update only explicitly supplied metadata.
+   // Metadata-only saves advance the drawing version without rewriting the scene.
    if((b?.name!==undefined||b?.collectionId!==undefined)&&!('elements'in b||'appState'in b||'files'in b||'preview'in b)){
     if(b.version!==undefined)assert(b.version===d.version,409,'VERSION_CONFLICT');
     if(b.collectionId!==undefined)await checkCollection(b.collectionId);
-    const result=await run('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,updatedAt=? WHERE id=? AND userId=? AND version=?',b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,now(),d.id,userId,d.version);
-    assert(result.meta.changes,409,'VERSION_CONFLICT');
-    updated=await ownDrawing(d.id);
+    updated=await first('UPDATE drawings SET name=COALESCE(?,name),collectionId=CASE WHEN ? THEN ? ELSE collectionId END,version=version+1,updatedAt=? WHERE id=? AND userId=? AND version=? RETURNING *',b.name===undefined?null:nameOf(b.name),Number(b.collectionId!==undefined),b.collectionId??null,now(),d.id,userId,d.version);
+    assert(updated,409,'VERSION_CONFLICT');
    }else updated=await save(d,b);
    if(/(?:^|[,;\s])return=minimal(?:$|[,;\s])/i.test(req.headers.get('Prefer')||'')){
     const {id,name,version,userId,collectionId,createdAt,updatedAt}=updated;
