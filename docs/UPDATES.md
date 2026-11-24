@@ -131,6 +131,17 @@ con la exclusión habitual de los cuatro ejemplos `.env*.example` del backend.
 Consulta las [notas de 0.7.0](upstream-release-0.7.0.md) para ver qué se adapta y
 qué no se ejecuta en Sites.
 
+### Historial de upstream registrado (24 de noviembre de 2026)
+
+`main` registra como ancestro `upstream/main` en
+`21a1ceff74e552d7c4e07c96f15df0fc831431c5` mediante un merge `-s ours`: el
+contenido hasta `v0.7.0` ya estaba portado y los dos commits posteriores solo
+cambian la documentación y el despliegue del sitio de upstream. `upstream-docs/`
+reproduce `docs/` de ese commit; `vercel.json` no se incorpora. La versión de la
+aplicación sigue siendo `v0.7.0`. Las próximas sincronizaciones pueden usar
+`git merge upstream/main`, resolviendo `backend/` → `upstream-backend/` y
+`docs/` → `upstream-docs/`, y adaptando `frontend/` y el Worker.
+
 ## 0.6.7 — 30 de octubre de 2026
 
 Tag: v0.6.7. Commit: 0f9be2d8649be7650e6bee2844739c584fa76c35.
