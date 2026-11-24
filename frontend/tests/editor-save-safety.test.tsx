@@ -1,13 +1,15 @@
 import React, { useLayoutEffect, useState } from "react";
 import ShallowRenderer from "react-test-renderer/shallow";
 import { Editor } from "../src/pages/Editor";
-import { restoreAppState } from "@excalidraw/excalidraw";
+import { exportScene, restoreAppState } from "@excalidraw/excalidraw";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/api";
 import { reloadAndReconcile } from "../src/pages/editor/reconcileSave";
 import { useEditorPersistence } from "../src/pages/editor/useEditorPersistence";
 import { useEditorSceneLoader } from "../src/pages/editor/useEditorSceneLoader";
+import { useEditorCollaboration } from "../src/pages/editor/useEditorCollaboration";
+import { api as pollingClient } from "../src/api/client";
 import { reconcileElements } from "../src/utils/sync";
 const { route } = vi.hoisted(() => ({ route: { id: "drawing" } }));
 vi.mock("react-router-dom", () => ({
@@ -18,6 +20,10 @@ vi.mock("react-router-dom", () => ({
 vi.mock("@excalidraw/excalidraw", async () => ({
   ...(await (await import("./helpers/excalidrawRestore")).loadExcalidrawRestore()),
   exportScene: vi.fn(),
+  CaptureUpdateAction: { IMMEDIATELY: "IMMEDIATELY", NEVER: "NEVER" },
+}));
+vi.mock("../src/api/client", () => ({
+  api: { get: vi.fn(), post: vi.fn() },
 }));
 vi.mock("../src/api", () => ({
   getDrawing: vi.fn(),
@@ -127,12 +133,158 @@ afterEach(async () => {
   await act(async () => renderer?.unmount());
   renderer = undefined;
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 const mount = async (Harness: React.ComponentType) => {
   await act(async () => {
     renderer = create(<Harness />);
   });
 };
+describe("live app-state convergence", () => {
+  it.each([
+    ["first", "autosave"], ["first", "queued explicit save"],
+    ["last", "autosave"], ["last", "queued explicit save"],
+  ])("adopts a peer's grid after saving the background %s via %s", async (order, mode) => {
+    vi.stubGlobal("window", Object.assign(new EventTarget(), {
+      location: { origin: "http://localhost" },
+    }));
+    vi.stubGlobal("document", new EventTarget());
+    vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) =>
+      setTimeout(() => run(Date.now()), 16),
+    );
+    vi.stubGlobal("cancelAnimationFrame", clearTimeout);
+    const rectangle = element("initial");
+    const ellipse = element("peer", 1, { type: "ellipse" });
+    const initial = { viewBackgroundColor: "#ffffff", gridSize: 20, gridModeEnabled: false };
+    const a = makeHarness([rectangle]);
+    const b = makeHarness([rectangle]);
+    const aState = { ...initial, gridStep: 5 };
+    const bState = { ...initial, gridStep: 8 };
+    for (const [h, local] of [[a, aState], [b, bState]] as const) {
+      h.refs.lastAcceptedAppState.current = initial;
+      h.editor.getAppState = () => local;
+      h.editor.updateScene.mockImplementation((scene) => {
+        if (scene.elements) h.setLive(scene.elements);
+        Object.assign(local, scene.appState);
+      });
+    }
+    let stored = { version: 1, elements: [rectangle], appState: initial, files: {} };
+    const commits: Array<[number | undefined, number]> = [];
+    const previewCommits: number[] = [];
+    if (mode !== "autosave") {
+      vi.mocked(exportScene).mockResolvedValueOnce({ outerHTML: "<svg />" } as never);
+    }
+    vi.mocked(api.getDrawing).mockImplementation(async () => structuredClone(stored) as never);
+    vi.mocked(api.saveDrawing).mockImplementation(async (_id, write) => {
+      if (write.version !== stored.version) {
+        commits.push([write.version, 409]);
+        throw { response: { status: 409 } };
+      }
+      if (write.preview) {
+        stored.version++;
+        previewCommits.push(stored.version);
+        return { version: stored.version } as never;
+      }
+      stored = {
+        ...stored,
+        version: stored.version + 1,
+        elements: structuredClone(write.elements) as typeof stored.elements,
+        appState: structuredClone(write.appState) as typeof initial,
+      };
+      commits.push([write.version, 200]);
+      return { version: stored.version } as never;
+    });
+    let elapsed = 0;
+    let aSessionId: string | undefined;
+    const startedAt = Date.now();
+    vi.mocked(pollingClient.get).mockImplementation(async (url, config) => {
+      if (!url.endsWith("/events")) return { data: structuredClone(stored) };
+      const { sessionId, since } = config?.params ?? {};
+      aSessionId ??= sessionId;
+      // The realtime element delta precedes the authoritative scene poll. Like
+      // Sites' actual event payload it does not contain persisted app state.
+      const events = sessionId === aSessionId && !since && Date.now() > startedAt
+        ? [{
+            id: 1, sessionId: "peer-session", createdAt: startedAt + 20,
+            event: "element-update", payload: { elements: [ellipse] },
+          }]
+        : [];
+      return { data: { events } };
+    });
+    const me = { id: "same-user", name: "User", initials: "U", color: "red" };
+    function Session({ h }: { h: typeof a }) {
+      useEditorCollaboration({
+        drawingId: "drawing", me, isReady: true,
+        excalidrawAPI: h.refs.excalidrawAPI,
+        currentDrawingVersionRef: h.refs.currentDrawingVersion,
+        lastAcceptedAppStateRef: h.refs.lastAcceptedAppState,
+        latestAppStateRef: h.refs.latestAppState,
+        latestElementsRef: h.refs.latestElements,
+        latestFilesRef: h.refs.latestFiles,
+        lastSyncedFilesRef: h.refs.lastSyncedFiles,
+        lastSyncedElementOrderRef: React.useRef(null),
+        recordElementVersion: React.useCallback(() => {}, []),
+        onAccessDenied: React.useCallback(() => {}, []),
+      });
+      return <h.Harness />;
+    }
+    await mount(() => <><Session h={a} /><Session h={b} /></>);
+    const tick = (ms: number) => act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+      elapsed += ms;
+    });
+    const saveA = () => {
+      if (mode === "autosave") {
+        a.persistence.debouncedSave("drawing", [rectangle], aState, {});
+      } else {
+        // Ctrl+S shares the scene save queue but also renders and writes a
+        // version-guarded preview after the scene save completes.
+        void a.persistence.enqueueSceneSave("drawing", [rectangle], aState, {}, {
+          suppressErrors: false,
+        }).then(() => a.persistence.savePreviewRef.current?.(
+          "drawing", a.refs.lastPersistedElements.current, aState, {}, {
+            expectedVersion: a.refs.currentDrawingVersion.current,
+            useSuppliedSnapshot: true,
+          },
+        ));
+      }
+    };
+    await tick(20);
+    aState.viewBackgroundColor = "#fffce8";
+    bState.gridModeEnabled = true;
+    bState.gridSize = 40;
+    b.setLive([rectangle, ellipse]);
+    if (order === "first") {
+      saveA();
+    } else {
+      // A previous preview write advances only the version, forcing B to retry
+      // before A starts its own save against the now-stale local version.
+      stored.version++;
+    }
+    b.persistence.debouncedSave("drawing", [rectangle, ellipse], bState, {});
+    await tick(1300);
+    expect(commits).toEqual(order === "first"
+      ? [[1, 200], [1, 409], [mode === "autosave" ? 2 : 3, 200]]
+      : [[1, 409], [2, 200]]);
+    expect(a.editor.getSceneElementsIncludingDeleted()).toEqual([rectangle, ellipse]);
+    expect(aState.gridModeEnabled).toBe(false);
+    if (order === "last") {
+      saveA();
+      await tick(1300);
+      expect(commits.slice(-2)).toEqual([[1, 409], [3, 200]]);
+      expect(aState.gridModeEnabled).toBe(true);
+    }
+    expect(previewCommits).toEqual(mode === "autosave" ? [] : [order === "first" ? 3 : 5]);
+    await tick(6020 - elapsed);
+    expect(a.editor.getSceneElementsIncludingDeleted()).toEqual([rectangle, ellipse]);
+    expect(a.editor.getAppState()).toMatchObject({
+      viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40, gridStep: 5,
+    });
+    expect(b.editor.getAppState()).toMatchObject({
+      viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40, gridStep: 8,
+    });
+  });
+});
 describe("conflict reconciliation", () => {
   it.each([
     ["stickynote", "baseHeight", 100, 140],
