@@ -40,6 +40,7 @@ type SceneLoaderParams = {
     lastSyncedElementOrder: MutableRefObject<readonly string[] | null>;
     lastPersistedFiles: MutableRefObject<Record<string, any>>;
     currentDrawingVersion: MutableRefObject<number | null>;
+    lastAcceptedAppState: MutableRefObject<Record<string, unknown>>;
     lastPersistedElements: MutableRefObject<readonly any[]>;
     suspiciousBlankLoad: MutableRefObject<boolean>;
     hasSceneChangesSinceLoad: MutableRefObject<boolean>;
@@ -104,6 +105,7 @@ export const useEditorSceneLoader = ({
     refs.lastSyncedElementOrder.current = null;
     refs.lastPersistedFiles.current = {};
     refs.currentDrawingVersion.current = null;
+    refs.lastAcceptedAppState.current = {};
     refs.lastPersistedElements.current = [];
     refs.suspiciousBlankLoad.current = false;
     refs.hasSceneChangesSinceLoad.current = false;
@@ -188,7 +190,8 @@ export const useEditorSceneLoader = ({
         refs.currentDrawingVersion.current = data.version;
         refs.lastPersistedElements.current = elements;
         elements.forEach((element: any) => recordElementVersion(element));
-        const persistedAppState = getPersistedAppState(data.appState || {});
+        const persistedAppState = getPersistedAppState(data.appState);
+        refs.lastAcceptedAppState.current = persistedAppState;
         const hydratedAppState = {
           ...persistedAppState,
           collaborators: new Map(),
@@ -293,6 +296,7 @@ export const useEditorSceneLoader = ({
         refs.lastSyncedElementOrder.current = null;
         refs.lastPersistedFiles.current = {};
         refs.currentDrawingVersion.current = null;
+        refs.lastAcceptedAppState.current = {};
         refs.lastPersistedElements.current = [];
         refs.suspiciousBlankLoad.current = false;
         refs.hasSceneChangesSinceLoad.current = false;

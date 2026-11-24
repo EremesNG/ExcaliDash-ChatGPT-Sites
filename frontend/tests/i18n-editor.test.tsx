@@ -91,6 +91,7 @@ describe("Spanish editor UI", () => {
     vi.mocked(api.saveDrawing).mockRejectedValue(failure);
     const elements = [{ id: "shape", type: "rectangle", version: 1 }];
     const refs = {
+      lastAcceptedAppState: ref<Record<string, unknown>>({}),
       currentDrawingVersion: ref<number | null>(1), debouncedSave: ref(null),
       excalidrawAPI: ref({ getSceneElementsIncludingDeleted: () => elements, getAppState: () => ({}), getFiles: () => ({}) }),
       isSyncing: ref(false), isUnmounting: ref(false), localSceneRevision: ref(1), savedSceneRevision: ref(0),
@@ -119,6 +120,7 @@ describe("Spanish editor UI", () => {
       elementVersionMap: ref(new Map()), saveQueue: ref(Promise.resolve()),
       latestElements: ref([]), initialSceneElements: ref([]), latestFiles: ref({}),
       isSyncing: ref(false), lastSyncedFiles: ref({}), lastSyncedElementOrder: ref(null), localSceneRevision: ref(0), savedSceneRevision: ref(0),
+      lastAcceptedAppState: ref<Record<string, unknown>>({}),
       lastPersistedFiles: ref({}), currentDrawingVersion: ref(null), lastPersistedElements: ref([]),
       suspiciousBlankLoad: ref(false), hasSceneChangesSinceLoad: ref(false), excalidrawAPI: ref(null),
       latestAppState: ref({}), isBootstrappingScene: ref(true), hasHydratedInitialScene: ref(false),

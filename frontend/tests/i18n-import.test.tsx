@@ -15,7 +15,7 @@ import { useLocale } from "../src/context/useLocale";
 import { AuthProvider } from "../src/context/AuthContext";
 import { UploadProvider, useUpload } from "../src/context/UploadContext";
 import { importDrawings, importLegacyFiles } from "../src/utils/importUtils";
-import { importLegacyZip } from "../src/utils/importHelpers";
+import * as importHelpers from "../src/utils/importHelpers";
 import { rehydrateFilesForExport } from "../src/utils/rehydrateFiles";
 import { getDrawing } from "../src/api/drawings";
 import { LocaleTestProvider } from "./helpers/locale";
@@ -75,7 +75,7 @@ it("keeps archive, entry and drawing indexes in Spanish legacy import errors", a
   const zip = new JSZip();
   zip.file("antiguo.json", JSON.stringify({ drawings: [null] }));
   const archive = new File([await zip.generateAsync({ type: "uint8array" })], "respaldo.zip");
-  expect((await importLegacyZip(archive, null)).errors).toEqual([
+  expect((await importHelpers.importLegacyZip(archive, null)).errors).toEqual([
     "respaldo.zip:antiguo.json: dibujo 1: Estructura no válida (faltan elements/appState)",
   ]);
 });
@@ -96,10 +96,17 @@ it("localizes confirmation defaults and retry controls without replacing caller 
 });
 
 it("localizes active upload counts, percentages and filename accessibility labels", async () => {
+  // The upload labels don't depend on rendering previews. Vitest can fall
+  // through to the real Excalidraw module on concurrent lazy mock imports.
+  vi.spyOn(importHelpers, "makeSvgPreview").mockResolvedValue({ outerHTML: "<svg/>" } as SVGSVGElement);
   let finish!: (value: any) => void;
   const pending = new Promise((resolve) => { finish = resolve; });
+  let markBothStarted!: () => void;
+  const bothStarted = new Promise<void>((resolve) => { markBothStarted = resolve; });
+  let started = 0;
   vi.spyOn(api, "post").mockImplementation(async (_path, _payload, config) => {
     config?.onUploadProgress?.({ loaded: 37, total: 100 } as any);
+    if (++started === 2) markBothStarted();
     return await pending as any;
   });
   const files = [drawingFile("uno.json", {}), drawingFile("dos.json", {})];
@@ -111,7 +118,10 @@ it("localizes active upload counts, percentages and filename accessibility label
   await act(async () => {
     renderer = create(<LocaleTestProvider language="es-ES"><UploadProvider><Upload /><UploadStatus /></UploadProvider></LocaleTestProvider>);
   });
-  await act(async () => { renderer!.root.findByType(Upload).findByType("button").props.onClick(); });
+  await act(async () => {
+    renderer!.root.findByType(Upload).findByType("button").props.onClick();
+    await bothStarted;
+  });
   expect(renderer!.root.findByType("h3").children.join("")).toBe("Subidas (2 activas)");
   expect(renderer!.root.findAllByType("span").map((span) => span.children.join(""))).toContain("37\u00a0%");
   expect(renderer!.root.findAllByType("div").filter((div) => div.props.style?.width === "37%")).toHaveLength(2);

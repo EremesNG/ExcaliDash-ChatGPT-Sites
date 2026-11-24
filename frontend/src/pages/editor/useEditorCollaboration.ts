@@ -13,6 +13,7 @@ import {
 import {
   buildRemoteSceneUpdate,
   getElementOrder,
+  mergePersistedAppState,
 } from "./shared";
 import * as api from "../../api";
 import { reconcileElements } from "../../utils/sync";
@@ -35,30 +36,12 @@ type UseEditorCollaborationInput = {
   onAccessDenied: () => void;
   // Saved-scene broadcasts carry the committed drawing version.
   currentDrawingVersionRef?: MutableRefObject<number | null>;
+  lastAcceptedAppStateRef?: MutableRefObject<Record<string, unknown>>;
   // Called when the server rejects edits but the drawing is still viewable.
   onReadOnly?: () => void;
   // Kept in step with persisted appState applied from saved-scene broadcasts,
   // so the next local change is not mistaken for a background/grid edit.
   latestAppStateRef?: MutableRefObject<any>;
-};
-
-// gridStep is persisted too, but the editor shows each user's own preference
-// for it (useEditorGridStep), so a peer's value is not applied.
-const PERSISTED_APP_STATE_KEYS = [
-  "viewBackgroundColor",
-  "gridSize",
-  "gridModeEnabled",
-] as const;
-
-const pickPersistedAppState = (value: unknown): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return {};
-  const source = value as Record<string, unknown>;
-  const picked: Record<string, unknown> = {};
-  for (const key of PERSISTED_APP_STATE_KEYS) {
-    if (key in source) picked[key] = source[key];
-  }
-  return picked;
 };
 
 const getSocketUrl = () =>
@@ -98,6 +81,7 @@ export const useEditorCollaboration = ({
   recordElementVersion,
   onAccessDenied,
   currentDrawingVersionRef,
+  lastAcceptedAppStateRef,
   onReadOnly,
   latestAppStateRef,
 }: UseEditorCollaborationInput) => {
@@ -114,7 +98,7 @@ export const useEditorCollaboration = ({
   const pendingRemoteFilesRef = useRef<Record<string, any>>({});
   const pendingRemoteElementOrderRef = useRef<string[] | null>(null);
   const pendingRemoteVersionRef = useRef<number | null>(null);
-  const pendingRemoteAppStateRef = useRef<Record<string, unknown> | null>(null);
+  const pendingRemoteAppStateRef = useRef<unknown>(null);
   const remoteFlushScheduledRef = useRef(false);
   const remoteFlushRafIdRef = useRef<number | null>(null);
   useEffect(() => {
@@ -283,50 +267,51 @@ export const useEditorCollaboration = ({
     });
     const hasNonEmptyArray = (value: unknown): value is any[] =>
       Array.isArray(value) && value.length > 0;
+    const stagePersistedAppState = (version: unknown, appState: unknown) => {
+      if (typeof version !== "number" || !Number.isInteger(version)) return;
+      const highestKnownVersion = Math.max(
+        currentDrawingVersionRef?.current ?? -1,
+        pendingRemoteVersionRef.current ?? -1,
+      );
+      if (version > highestKnownVersion) {
+        pendingRemoteVersionRef.current = version;
+        pendingRemoteAppStateRef.current = appState;
+      }
+    };
     // Advance only after the committed scene (and its fetched files) is merged,
     // so the next save never claims a version whose content is not local yet.
-    const applyPersistedAppState = () => {
-      const next = pendingRemoteAppStateRef.current;
-      const editor = excalidrawAPI.current;
-      if (!next || !editor) return;
+    const advanceVersion = () => {
+      if (pendingFileFetches > 0) return;
+      const version = pendingRemoteVersionRef.current;
+      if (version === null) return;
+      pendingRemoteVersionRef.current = null;
+      const remote = pendingRemoteAppStateRef.current;
       pendingRemoteAppStateRef.current = null;
-      const current = editor.getAppState?.() ?? {};
-      const changed = Object.fromEntries(
-        Object.entries(next).filter(([key, value]) => current[key] !== value),
+      const current = currentDrawingVersionRef?.current;
+      const editor = excalidrawAPI.current;
+      if (
+        !editor || !currentDrawingVersionRef ||
+        typeof current !== "number" || version <= current
+      ) return;
+      const local = editor.getAppState?.() ?? latestAppStateRef?.current ?? {};
+      const { nextBase, patch } = mergePersistedAppState(
+        lastAcceptedAppStateRef?.current ?? {},
+        local,
+        remote,
       );
-      if (Object.keys(changed).length > 0) {
+      if (lastAcceptedAppStateRef) lastAcceptedAppStateRef.current = nextBase;
+      currentDrawingVersionRef.current = version;
+      if (Object.keys(patch).length > 0) {
         isSyncing.current = true;
         try {
           editor.updateScene({
-            appState: changed,
+            appState: patch,
             captureUpdate: CaptureUpdateAction.NEVER,
           });
         } finally {
           isSyncing.current = false;
         }
-      }
-      if (latestAppStateRef?.current) {
-        latestAppStateRef.current = { ...latestAppStateRef.current, ...next };
-      }
-    };
-    const advanceVersion = () => {
-      if (pendingFileFetches > 0) return;
-      const remoteVersion = pendingRemoteVersionRef.current;
-      if (remoteVersion === null) {
-        applyPersistedAppState();
-        return;
-      }
-      pendingRemoteVersionRef.current = null;
-      const current = currentDrawingVersionRef?.current;
-      if (
-        currentDrawingVersionRef &&
-        typeof current === "number" &&
-        remoteVersion > current
-      ) {
-        applyPersistedAppState();
-        currentDrawingVersionRef.current = remoteVersion;
-      } else {
-        pendingRemoteAppStateRef.current = null;
+        if (latestAppStateRef) latestAppStateRef.current = { ...local, ...patch };
       }
     };
     const flushRemoteUpdates = () => {
@@ -516,24 +501,7 @@ export const useEditorCollaboration = ({
       }) => {
         stageElements(elements, persisted === true);
         stageFiles(files, persisted === true);
-        if (
-          persisted === true &&
-          typeof version === "number" &&
-          Number.isInteger(version)
-        ) {
-          const highestKnownVersion = Math.max(
-            currentDrawingVersionRef?.current ?? -1,
-            pendingRemoteVersionRef.current ?? -1,
-          );
-          if (version > highestKnownVersion) {
-            pendingRemoteVersionRef.current = version;
-            const persistedAppState = pickPersistedAppState(appState);
-            pendingRemoteAppStateRef.current =
-              Object.keys(persistedAppState).length > 0
-                ? persistedAppState
-                : null;
-          }
-        }
+        if (persisted === true) stagePersistedAppState(version, appState);
         if (
           !persisted &&
           Array.isArray(elementOrder) &&
@@ -564,6 +532,7 @@ export const useEditorCollaboration = ({
           ),
         );
         stageFiles(remoteFiles, true);
+        stagePersistedAppState(remote.version, remote.appState);
         scheduleRemoteFlush();
       } catch (error) {
         if (!cancelled && generation === catchupGeneration) {
@@ -661,6 +630,7 @@ export const useEditorCollaboration = ({
     recordElementVersion,
     onAccessDenied,
     currentDrawingVersionRef,
+    lastAcceptedAppStateRef,
     onReadOnly,
     latestAppStateRef,
   ]);

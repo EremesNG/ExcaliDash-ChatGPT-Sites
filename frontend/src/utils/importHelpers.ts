@@ -1,6 +1,5 @@
 import { translate } from "../i18n";
 import { getApiErrorMessage } from "./getApiErrorMessage";
-import { exportScene } from "@excalidraw/excalidraw";
 import { api } from "../api";
 
 type ExcalidrawLikeData = {
@@ -102,6 +101,7 @@ export const makeSvgPreview = async (
   appState: Record<string, any>,
   files: Record<string, any>,
 ) => {
+  const { exportScene } = await import("@excalidraw/excalidraw");
   return exportScene({
     type: "svg",
     data: { elements, appState, files: files || {} },

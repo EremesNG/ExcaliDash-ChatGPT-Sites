@@ -109,6 +109,7 @@ const ExcalidrawEditor: React.FC = () => {
     | null
   >(null);
   const currentDrawingVersionRef = useRef<number | null>(null);
+  const lastAcceptedAppStateRef = useRef<Record<string, unknown>>({});
   const lastPersistedElementsRef = useRef<readonly any[]>([]);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const suspiciousBlankLoadRef = useRef(false);
@@ -158,6 +159,7 @@ const ExcalidrawEditor: React.FC = () => {
     recordElementVersion,
     onAccessDenied: handleSocketAccessDenied,
     currentDrawingVersionRef,
+    lastAcceptedAppStateRef,
     onReadOnly: handleReadOnly,
     latestAppStateRef,
   });
@@ -191,6 +193,7 @@ const ExcalidrawEditor: React.FC = () => {
   const persistenceRefs = React.useMemo(
     () => ({
       currentDrawingVersion: currentDrawingVersionRef,
+      lastAcceptedAppState: lastAcceptedAppStateRef,
       debouncedSave: debouncedSaveRef,
       excalidrawAPI,
       isSyncing,
@@ -257,6 +260,7 @@ const ExcalidrawEditor: React.FC = () => {
       lastSyncedElementOrder: lastSyncedElementOrderRef,
       lastPersistedFiles: lastPersistedFilesRef,
       currentDrawingVersion: currentDrawingVersionRef,
+      lastAcceptedAppState: lastAcceptedAppStateRef,
       lastPersistedElements: lastPersistedElementsRef,
       suspiciousBlankLoad: suspiciousBlankLoadRef,
       hasSceneChangesSinceLoad: hasSceneChangesSinceLoadRef,

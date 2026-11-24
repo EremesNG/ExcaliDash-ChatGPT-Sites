@@ -65,6 +65,7 @@ export type SavePreviewOptions = {
 
 type PersistenceRefs = {
   currentDrawingVersion: MutableRefObject<number | null>;
+  lastAcceptedAppState: MutableRefObject<Record<string, unknown>>;
   debouncedSave: MutableRefObject<
     | ((
         drawingId: string,
@@ -292,11 +293,12 @@ export const useEditorPersistence = ({
             ...(socketId ? [{ socketId }] : []),
           );
           if (!canEditRef.current || !isCurrent()) return;
-          if (typeof updated.version === "number") {
-            refs.currentDrawingVersion.current = Math.max(
-              refs.currentDrawingVersion.current ?? 0,
-              updated.version,
-            );
+          if (
+            typeof updated.version === "number" &&
+            updated.version >= (refs.currentDrawingVersion.current ?? 0)
+          ) {
+            refs.currentDrawingVersion.current = updated.version;
+            refs.lastAcceptedAppState.current = appStateToSave;
           }
           refs.lastPersistedElements.current = elementsToSave;
           refs.savedSceneRevision.current = revision;
@@ -316,6 +318,7 @@ export const useEditorPersistence = ({
                 elementsToSave,
                 filesToSave,
                 isCurrent,
+                appStateToSave,
               );
               if (!reconciled) return;
               const reconciledAppState = getPersistedAppState(

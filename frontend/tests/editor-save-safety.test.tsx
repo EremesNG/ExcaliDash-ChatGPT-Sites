@@ -55,6 +55,7 @@ const makeHarness = (initial = [element("local")]) => {
     }),
   };
   const refs = {
+    lastAcceptedAppState: ref<Record<string, unknown>>(appState),
     currentDrawingVersion: ref<number | null>(1),
     debouncedSave: ref(null),
     excalidrawAPI: ref<any>(editor),
@@ -196,6 +197,38 @@ describe("conflict reconciliation", () => {
   });
 });
 describe("serialized saves", () => {
+  it("retries with the local background, peer shape, and peer grid change", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    h.editor.getAppState = () => ({ viewBackgroundColor: "#ff0000" });
+    vi.mocked(api.saveDrawing).mockRejectedValueOnce({
+      response: { status: 409 },
+    });
+    vi.mocked(api.getDrawing).mockResolvedValueOnce({
+      version: 2,
+      elements: [element("peer")],
+      files: {},
+      appState: { viewBackgroundColor: "#ffffff", gridSize: 20 },
+    } as never);
+
+    await act(async () => {
+      const save = h.persistence.enqueueSceneSave(
+        "drawing", [element("local")], appState, {},
+      );
+      await vi.advanceTimersByTimeAsync(500);
+      await save;
+    });
+
+    expect(api.saveDrawing).toHaveBeenNthCalledWith(
+      2,
+      "drawing",
+      expect.objectContaining({
+        version: 2,
+        elements: expect.arrayContaining([element("local"), element("peer")]),
+        appState: { viewBackgroundColor: "#ff0000", gridSize: 20 },
+      }),
+    );
+  });
   it("rebases a queued pre-conflict scene before using the advanced server version", async () => {
     const h = makeHarness();
     await mount(h.Harness);

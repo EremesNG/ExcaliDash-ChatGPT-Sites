@@ -42,6 +42,7 @@ const mountEditor = async () => {
   };
   const refs = {
     hasSceneChangesSinceLoad: ref(true),
+    lastAcceptedAppState: ref<Record<string, unknown>>({}),
     currentDrawingVersion: ref<number | null>(1),
     debouncedSave: ref(null),
     excalidrawAPI: ref(liveAPI),

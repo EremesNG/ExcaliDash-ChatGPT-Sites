@@ -5,9 +5,12 @@ import {
   filesNeedRehydration,
   rehydrateFilesFromUrls,
 } from "../../utils/rehydrateFiles";
+import { mergePersistedAppState } from "./shared";
 
 type ReconcileRefs = {
   currentDrawingVersion: MutableRefObject<number | null>;
+  lastAcceptedAppState: MutableRefObject<Record<string, unknown>>;
+  latestAppState: MutableRefObject<Record<string, unknown> | null>;
   excalidrawAPI: MutableRefObject<any>;
   isSyncing: MutableRefObject<boolean>;
   latestElements: MutableRefObject<readonly any[]>;
@@ -28,6 +31,7 @@ export const reloadAndReconcile = async (
   localElements: readonly any[],
   localFiles: Record<string, any>,
   isCurrent: () => boolean = () => true,
+  sampledAppState?: Record<string, unknown>,
 ): Promise<{
   elements: readonly any[];
   files: Record<string, any>;
@@ -58,21 +62,20 @@ export const reloadAndReconcile = async (
     ...refs.latestFiles.current,
     ...editor?.getFiles?.(),
   };
-  const remoteAppState =
-    remote.appState && typeof remote.appState === "object"
-      ? (remote.appState as Record<string, any>)
-      : {};
-  const syncedAppState: Record<string, any> = {};
-  for (const key of ["viewBackgroundColor", "gridSize", "gridModeEnabled"]) {
-    if (key in remoteAppState) {
-      syncedAppState[key] = remoteAppState[key];
-    }
+  const localAppState =
+    editor?.getAppState?.() ?? refs.latestAppState.current ?? sampledAppState ?? {};
+  // A saved-scene event may have advanced the base while the read was pending.
+  const acceptsRemote = remote.version >= (refs.currentDrawingVersion.current ?? 0);
+  const { nextBase, patch } = mergePersistedAppState(
+    refs.lastAcceptedAppState.current,
+    localAppState,
+    acceptsRemote ? remote.appState : undefined,
+  );
+  if (acceptsRemote) {
+    refs.currentDrawingVersion.current = remote.version;
+    refs.lastAcceptedAppState.current = nextBase;
   }
-  const mergedAppState = {
-    ...(editor?.getAppState?.() || {}),
-    ...syncedAppState,
-  };
-  refs.currentDrawingVersion.current = remote.version;
+  const mergedAppState = { ...localAppState, ...patch };
   if (editor) {
     refs.isSyncing.current = true;
     try {
@@ -82,8 +85,8 @@ export const reloadAndReconcile = async (
       if (typeof editor.updateScene === "function") {
         editor.updateScene({
           elements: mergedElements,
-          ...(Object.keys(syncedAppState).length > 0
-            ? { appState: syncedAppState }
+          ...(Object.keys(patch).length > 0
+            ? { appState: patch }
             : {}),
           captureUpdate: "NEVER",
         });
@@ -92,6 +95,7 @@ export const reloadAndReconcile = async (
       refs.isSyncing.current = false;
     }
   }
+  refs.latestAppState.current = mergedAppState;
   refs.latestElements.current = mergedElements;
   refs.latestFiles.current = mergedFiles;
   refs.lastSyncedFiles.current = mergedFiles;

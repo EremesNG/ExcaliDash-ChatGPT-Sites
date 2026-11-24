@@ -163,6 +163,10 @@ const makeHarness = () => {
     ...refs,
     me,
     isReady: true,
+    currentDrawingVersionRef: ref<number | null>(1),
+    lastAcceptedAppStateRef: ref<Record<string, unknown>>({
+      viewBackgroundColor: "#ffffff", gridSize: null,
+    }),
     excalidrawAPI: ref(editor),
     recordElementVersion: vi.fn(),
     onAccessDenied: vi.fn(),
@@ -771,6 +775,28 @@ describe("remote collaboration staging", () => {
     });
     await flushFrames();
     expect(h.refs.latestFilesRef.current).toEqual(newer);
+  });
+  it("catches up the peer shape and grid without overwriting the unsaved local background", async () => {
+    const h = makeHarness();
+    await mount(h.Harness);
+    h.setAppState({ viewBackgroundColor: "#ff0000", gridSize: null });
+    vi.mocked(api.getDrawing).mockResolvedValueOnce({
+      version: 2,
+      elements: [element("peer", 2)],
+      files: {},
+      appState: { viewBackgroundColor: "#ffffff", gridSize: 20 },
+    } as never);
+
+    await act(async () => {
+      sockets[0].ack({ user: me });
+    });
+    await flushFrames();
+
+    expect(h.editor.getSceneElementsIncludingDeleted()).toEqual([element("peer", 2)]);
+    expect(h.editor.getAppState()).toMatchObject({
+      viewBackgroundColor: "#ff0000", gridSize: 20,
+    });
+    expect(h.input.currentDrawingVersionRef.current).toBe(2);
   });
   it("catches up missed persisted peer edits on each room join while preserving unsaved local work", async () => {
     const h = makeHarness();
