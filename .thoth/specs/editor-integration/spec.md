@@ -8,11 +8,11 @@ Durable behavior for editor-integration.
 
 ### Requirement: Pinned editor build
 
-The frontend MUST depend on the exact published editor version `0.18.0-3c916c5`, with full commit, integrity and production provenance recorded in `upstream.json`; offline consistency validation MUST reject disagreement among the manifest, lockfile and provenance.
+The frontend MUST depend on the exact published editor version `0.18.0-9c2e462`, with full commit, integrity and production provenance recorded in `upstream.json`; offline consistency validation MUST reject disagreement among the manifest, lockfile and provenance.
 
 #### Scenario: Pinned editor build
 
-- **GIVEN** the current production editor is `0.18.0-3c916c5`
+- **GIVEN** the current production editor is `0.18.0-9c2e462`
 - **WHEN** the update is installed and built
 - **THEN** the exact version and matching full commit/integrity are recorded and the offline consistency check passes
 
@@ -22,6 +22,6 @@ Authenticated users MUST be able to see the built editor version and production 
 
 #### Scenario: Editor upstream drift status
 
-- **GIVEN** the pinned editor is `0.18.0-3c916c5`
+- **GIVEN** the pinned editor is `0.18.0-9c2e462`
 - **WHEN** excalidraw.com reports a later build with another hash
 - **THEN** `/api/system/editor` returns `newer` and Advanced shows an update
