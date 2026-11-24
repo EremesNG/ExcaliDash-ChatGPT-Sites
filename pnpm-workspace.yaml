@@ -1,5 +1,5 @@
 # Copied Sites are standalone projects and cannot inherit the monorepo policy.
-minimumReleaseAge: 10080
+minimumReleaseAge: 4320
 minimumReleaseAgeIgnoreMissingTime: false
 trustLockfile: false
 strictDepBuilds: true

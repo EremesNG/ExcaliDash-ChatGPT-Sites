@@ -51,7 +51,7 @@ paths and references to a missing root `eslint.config.js`.
 Use Node.js **>=24.22.1** (CI uses 24.22.1). There is no `.nvmrc`.
 Use **pnpm 11.25.0** at the root and **npm 10.9.2** for `frontend/` and
 `upstream-backend/`. Keep each package's own lockfile and package manager.
-Root policy includes a seven-day minimum release age and native-build allowlist;
+Root policy includes a three-day minimum release age and native-build allowlist;
 do not bypass these policies to make an install pass.
 
 Run from the repository root unless noted:
