@@ -158,10 +158,7 @@ const ExcalidrawEditor: React.FC = () => {
     latestFilesRef,
     recordElementVersion,
     onAccessDenied: handleSocketAccessDenied,
-    currentDrawingVersionRef,
-    lastAcceptedAppStateRef,
     onReadOnly: handleReadOnly,
-    latestAppStateRef,
   });
   const { scanNow: scanFileUploads } = useEditorFileUploads({
     canEdit,

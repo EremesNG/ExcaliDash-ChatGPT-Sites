@@ -166,10 +166,6 @@ const makeHarness = () => {
     ...refs,
     me,
     isReady: true,
-    currentDrawingVersionRef: ref<number | null>(1),
-    lastAcceptedAppStateRef: ref<Record<string, unknown>>({
-      viewBackgroundColor: "#ffffff", gridSize: null,
-    }),
     excalidrawAPI: ref(editor),
     recordElementVersion: vi.fn(),
     onAccessDenied: vi.fn(),
@@ -794,24 +790,29 @@ describe("remote collaboration staging", () => {
     await mount(Harness);
     const selector = () => renderer!.root.findByType("input");
     expect(h.editor.getAppState().gridStep).toBe(selector().props.value);
+    h.editor.updateScene.mockClear();
 
     await act(async () => {
       sockets[0].handlers.get("element-update")({
         persisted: true,
         version: 2,
         elements: [element("peer", 2)],
-        appState: { gridStep: 8, theme: "dark", langCode: "es-ES" },
+        appState: {
+          gridStep: 8, theme: "dark", langCode: "es-ES",
+          viewBackgroundColor: "#aabbcc", gridSize: 40, gridModeEnabled: true,
+        },
       });
     });
     await flushFrames();
 
-    expect(h.input.currentDrawingVersionRef.current).toBe(2);
+    expect(h.editor.getSceneElementsIncludingDeleted()).toEqual([element("peer", 2)]);
+    expect(h.editor.updateScene.mock.calls.every(([scene]) => !("appState" in scene))).toBe(true);
     expect(selector().props.value).toBe(5);
     expect(h.editor.getAppState().gridStep).toBe(5);
     expect(h.editor.getAppState()).not.toHaveProperty("theme");
     expect(h.editor.getAppState()).not.toHaveProperty("langCode");
   });
-  it("catches up the peer shape and grid without overwriting the unsaved local background", async () => {
+  it("catches up the peer shape on join without applying peer canvas settings", async () => {
     const h = makeHarness();
     await mount(h.Harness);
     h.setAppState({ viewBackgroundColor: "#ff0000", gridSize: 20 });
@@ -829,9 +830,8 @@ describe("remote collaboration staging", () => {
 
     expect(h.editor.getSceneElementsIncludingDeleted()).toEqual([element("peer", 2)]);
     expect(h.editor.getAppState()).toMatchObject({
-      viewBackgroundColor: "#ff0000", gridSize: 40,
+      viewBackgroundColor: "#ff0000", gridSize: 20,
     });
-    expect(h.input.currentDrawingVersionRef.current).toBe(2);
   });
   it("catches up missed persisted peer edits on each room join while preserving unsaved local work", async () => {
     const h = makeHarness();

@@ -114,10 +114,10 @@ const makeHarness = (initial = [element("local")]) => {
     refs,
     editor,
     Harness,
-    setLive: (elements: any[]) => {
+    setLive: (elements: any[], localEdit = true) => {
       live = elements;
       refs.latestElements.current = elements;
-      refs.localSceneRevision.current++;
+      if (localEdit) refs.localSceneRevision.current++;
     },
     get persistence() {
       return persistence;
@@ -140,21 +140,130 @@ const mount = async (Harness: React.ComponentType) => {
     renderer = create(<Harness />);
   });
 };
-describe("live app-state convergence", () => {
+const stubCollaborationGlobals = () => {
+  vi.stubGlobal("window", Object.assign(new EventTarget(), {
+    location: { origin: "http://localhost" },
+  }));
+  vi.stubGlobal("document", new EventTarget());
+  vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) =>
+    setTimeout(() => run(Date.now()), 16),
+  );
+  vi.stubGlobal("cancelAnimationFrame", clearTimeout);
+};
+const me = { id: "same-user", name: "User", initials: "U", color: "red" };
+function CollaborationSession({ h }: { h: ReturnType<typeof makeHarness> }) {
+  useEditorCollaboration({
+    drawingId: "drawing", me, isReady: true,
+    excalidrawAPI: h.refs.excalidrawAPI,
+    latestElementsRef: h.refs.latestElements,
+    latestFilesRef: h.refs.latestFiles,
+    lastSyncedFilesRef: h.refs.lastSyncedFiles,
+    lastSyncedElementOrderRef: React.useRef(null),
+    recordElementVersion: React.useCallback(() => {}, []),
+    onAccessDenied: React.useCallback(() => {}, []),
+  });
+  return <h.Harness />;
+}
+const makeLoader = (h: ReturnType<typeof makeHarness>): Parameters<typeof useEditorSceneLoader>[0] => ({
+  id: "drawing",
+  user: null,
+  isReady: false,
+  canEdit: true,
+  debouncedSaveLibrary: vi.fn(),
+  location: { pathname: "/editor/drawing", hash: "", search: "" },
+  navigate: vi.fn(),
+  refs: {
+    ...h.refs,
+    elementVersionMap: ref(new Map()),
+    initialSceneElements: ref([]),
+    lastSyncedElementOrder: ref(null),
+    hasSceneChangesSinceLoad: ref(false),
+    isBootstrappingScene: ref(true),
+    hasHydratedInitialScene: ref(false),
+  },
+  setAccessLevel: vi.fn(),
+  setDrawingName: vi.fn(),
+  setIsReady: vi.fn(),
+  setIsSceneLoading: vi.fn(),
+  setLoadError: vi.fn(),
+  recordElementVersion: vi.fn(),
+  normalizeImageElementStatus: (elements = []) => elements,
+  setInitialData: (scene) => {
+    if (!scene) return;
+    const restored = restoreAppState(scene.appState, null);
+    h.editor.getAppState = () => restored;
+    h.refs.excalidrawAPI.current = h.editor;
+  },
+});
+describe("delayed scene-save acknowledgement", () => {
+  it("saves a newer grid toggle and element edit after polling its own unacknowledged commit", async () => {
+    stubCollaborationGlobals();
+    const original = element("local", 1, { x: 0 });
+    const edited = { ...original, x: 100 };
+    const h = makeHarness([original]);
+    const local = { ...appState, gridModeEnabled: false, gridSize: 20 };
+    h.refs.lastAcceptedAppState.current = { ...local };
+    h.editor.getAppState = () => local;
+    h.editor.updateScene.mockImplementation((scene) => {
+      if (scene.elements) h.setLive(scene.elements, false);
+      Object.assign(local, scene.appState);
+    });
+    let stored = { version: 1, elements: [original], appState: { ...local }, files: {} };
+    const ack = deferred<{ version: number }>();
+    vi.mocked(api.getDrawing).mockImplementation(async () => structuredClone(stored) as never);
+    const polledVersions: number[] = [];
+    vi.mocked(pollingClient.get).mockImplementation(async (url) => {
+      if (url.endsWith("/events")) return { data: { events: [] } };
+      polledVersions.push(stored.version);
+      return { data: structuredClone(stored) };
+    });
+    vi.mocked(api.saveDrawing).mockImplementation(async (_id, write) => {
+      expect(write.version).toBe(stored.version);
+      stored = {
+        ...stored,
+        version: stored.version + 1,
+        elements: structuredClone(write.elements) as typeof stored.elements,
+        appState: structuredClone(write.appState) as typeof local,
+      };
+      return (stored.version === 2 ? ack.promise : { version: stored.version }) as never;
+    });
+    await mount(() => <CollaborationSession h={h} />);
+    const tick = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+    local.gridModeEnabled = true;
+    h.persistence.debouncedSave("drawing", [original], local, {});
+    await tick(1100);
+    expect(stored).toMatchObject({ version: 2, appState: { gridModeEnabled: true } });
+    expect(h.refs.savedSceneRevision.current).toBe(0);
+
+    local.gridModeEnabled = false;
+    h.setLive([edited]);
+    h.persistence.debouncedSave("drawing", [edited], local, {});
+    await tick(5000);
+    expect(h.editor.getSceneElementsIncludingDeleted()).toEqual([edited]);
+    expect(stored.version).toBe(2);
+    expect(polledVersions).toContain(2);
+    const versionBeforeAck = h.refs.currentDrawingVersion.current;
+    await act(async () => {
+      ack.resolve({ version: 2 });
+      await h.refs.saveQueue.current;
+    });
+
+    expect(stored.version).toBe(3);
+    expect(stored.elements).toEqual([edited]);
+    expect(h.refs.savedSceneRevision.current).toBe(h.refs.localSceneRevision.current);
+    expect([local.gridModeEnabled, stored.appState.gridModeEnabled]).toEqual([false, false]);
+    expect(versionBeforeAck).toBe(1);
+  });
+});
+describe("persisted scene settings", () => {
   it.each([
     ["first", "autosave"], ["first", "queued explicit save"],
     ["last", "autosave"], ["last", "queued explicit save"],
-  ])("adopts a peer's grid after saving the background %s via %s", async (order, mode) => {
-    vi.stubGlobal("window", Object.assign(new EventTarget(), {
-      location: { origin: "http://localhost" },
-    }));
-    vi.stubGlobal("document", new EventTarget());
-    vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) =>
-      setTimeout(() => run(Date.now()), 16),
-    );
-    vi.stubGlobal("cancelAnimationFrame", clearTimeout);
+  ])("applies peer settings only on reload or retry when saving the background %s via %s", async (order, mode) => {
+    stubCollaborationGlobals();
     const rectangle = element("initial");
     const ellipse = element("peer", 1, { type: "ellipse" });
+    const localShape = element("local-only", 1, { type: "diamond" });
     const initial = { viewBackgroundColor: "#ffffff", gridSize: 20, gridModeEnabled: false };
     const a = makeHarness([rectangle]);
     const b = makeHarness([rectangle]);
@@ -164,11 +273,13 @@ describe("live app-state convergence", () => {
       h.refs.lastAcceptedAppState.current = initial;
       h.editor.getAppState = () => local;
       h.editor.updateScene.mockImplementation((scene) => {
-        if (scene.elements) h.setLive(scene.elements);
+        if (scene.elements) h.setLive(scene.elements, false);
         Object.assign(local, scene.appState);
       });
     }
-    let stored = { version: 1, elements: [rectangle], appState: initial, files: {} };
+    let stored = {
+      version: 1, elements: [rectangle], appState: initial, files: {}, accessLevel: "owner",
+    };
     const commits: Array<[number | undefined, number]> = [];
     const previewCommits: number[] = [];
     if (mode !== "autosave") {
@@ -194,52 +305,20 @@ describe("live app-state convergence", () => {
       commits.push([write.version, 200]);
       return { version: stored.version } as never;
     });
-    let elapsed = 0;
-    let aSessionId: string | undefined;
-    const startedAt = Date.now();
-    vi.mocked(pollingClient.get).mockImplementation(async (url, config) => {
-      if (!url.endsWith("/events")) return { data: structuredClone(stored) };
-      const { sessionId, since } = config?.params ?? {};
-      aSessionId ??= sessionId;
-      // The realtime element delta precedes the authoritative scene poll. Like
-      // Sites' actual event payload it does not contain persisted app state.
-      const events = sessionId === aSessionId && !since && Date.now() > startedAt
-        ? [{
-            id: 1, sessionId: "peer-session", createdAt: startedAt + 20,
-            event: "element-update", payload: { elements: [ellipse] },
-          }]
-        : [];
-      return { data: { events } };
-    });
-    const me = { id: "same-user", name: "User", initials: "U", color: "red" };
-    function Session({ h }: { h: typeof a }) {
-      useEditorCollaboration({
-        drawingId: "drawing", me, isReady: true,
-        excalidrawAPI: h.refs.excalidrawAPI,
-        currentDrawingVersionRef: h.refs.currentDrawingVersion,
-        lastAcceptedAppStateRef: h.refs.lastAcceptedAppState,
-        latestAppStateRef: h.refs.latestAppState,
-        latestElementsRef: h.refs.latestElements,
-        latestFilesRef: h.refs.latestFiles,
-        lastSyncedFilesRef: h.refs.lastSyncedFiles,
-        lastSyncedElementOrderRef: React.useRef(null),
-        recordElementVersion: React.useCallback(() => {}, []),
-        onAccessDenied: React.useCallback(() => {}, []),
-      });
-      return <h.Harness />;
-    }
-    await mount(() => <><Session h={a} /><Session h={b} /></>);
+    vi.mocked(pollingClient.get).mockImplementation(async (url) => ({
+      data: url.endsWith("/events") ? { events: [] } : structuredClone(stored),
+    }));
+    await mount(() => <><CollaborationSession h={a} /><CollaborationSession h={b} /></>);
     const tick = (ms: number) => act(async () => {
       await vi.advanceTimersByTimeAsync(ms);
-      elapsed += ms;
     });
     const saveA = () => {
       if (mode === "autosave") {
-        a.persistence.debouncedSave("drawing", [rectangle], aState, {});
+        a.persistence.debouncedSave("drawing", a.editor.getSceneElementsIncludingDeleted(), aState, {});
       } else {
         // Ctrl+S shares the scene save queue but also renders and writes a
         // version-guarded preview after the scene save completes.
-        void a.persistence.enqueueSceneSave("drawing", [rectangle], aState, {}, {
+        void a.persistence.enqueueSceneSave("drawing", a.editor.getSceneElementsIncludingDeleted(), aState, {}, {
           suppressErrors: false,
         }).then(() => a.persistence.savePreviewRef.current?.(
           "drawing", a.refs.lastPersistedElements.current, aState, {}, {
@@ -255,6 +334,7 @@ describe("live app-state convergence", () => {
     bState.gridSize = 40;
     b.setLive([rectangle, ellipse]);
     if (order === "first") {
+      a.setLive([rectangle, localShape]);
       saveA();
     } else {
       // A previous preview write advances only the version, forcing B to retry
@@ -266,23 +346,49 @@ describe("live app-state convergence", () => {
     expect(commits).toEqual(order === "first"
       ? [[1, 200], [1, 409], [mode === "autosave" ? 2 : 3, 200]]
       : [[1, 409], [2, 200]]);
-    expect(a.editor.getSceneElementsIncludingDeleted()).toEqual([rectangle, ellipse]);
-    expect(aState.gridModeEnabled).toBe(false);
+    expect(a.editor.getSceneElementsIncludingDeleted()).toEqual(
+      order === "first" ? [rectangle, localShape] : [rectangle],
+    );
+    await tick(4700);
+    expect(a.editor.getSceneElementsIncludingDeleted()).toEqual(
+      expect.arrayContaining([rectangle, ellipse]),
+    );
+    expect(a.editor.getAppState()).toMatchObject({
+      viewBackgroundColor: "#fffce8", gridModeEnabled: false, gridSize: 20, gridStep: 5,
+    });
+
     if (order === "last") {
+      a.setLive([rectangle, ellipse, localShape]);
       saveA();
       await tick(1300);
       expect(commits.slice(-2)).toEqual([[1, 409], [3, 200]]);
-      expect(aState.gridModeEnabled).toBe(true);
+      expect(b.editor.getAppState()).toMatchObject({ viewBackgroundColor: "#ffffff" });
+    } else {
+      expect(b.editor.getAppState()).toMatchObject({
+        viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40, gridStep: 8,
+      });
+      const reloaded = makeHarness();
+      const loader = makeLoader(reloaded);
+      function ReloadedSession() {
+        useEditorSceneLoader(loader);
+        return null;
+      }
+      await act(async () => renderer?.unmount());
+      await mount(ReloadedSession);
+      expect(reloaded.editor.getAppState()).toMatchObject({
+        viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40,
+      });
     }
     expect(previewCommits).toEqual(mode === "autosave" ? [] : [order === "first" ? 3 : 5]);
-    await tick(6020 - elapsed);
-    expect(a.editor.getSceneElementsIncludingDeleted()).toEqual([rectangle, ellipse]);
-    expect(a.editor.getAppState()).toMatchObject({
-      viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40, gridStep: 5,
+    expect(stored.appState).toEqual({
+      viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40,
+      gridStep: order === "first" ? 8 : 5,
     });
-    expect(b.editor.getAppState()).toMatchObject({
-      viewBackgroundColor: "#fffce8", gridModeEnabled: true, gridSize: 40, gridStep: 8,
-    });
+    expect(stored.elements).toHaveLength(3);
+    expect(stored.elements).toEqual(expect.arrayContaining([rectangle, ellipse, localShape]));
+    if (order === "last") {
+      expect(a.editor.getAppState()).toMatchObject({ ...stored.appState, gridStep: 5 });
+    }
   });
 });
 describe("conflict reconciliation", () => {
@@ -356,37 +462,7 @@ describe("conflict reconciliation", () => {
 describe("serialized saves", () => {
   it("retries a legacy drawing with the local background and peer grid size, not the peer grid step", async () => {
     const h = makeHarness();
-    const loader: Parameters<typeof useEditorSceneLoader>[0] = {
-      id: "drawing",
-      user: null,
-      isReady: false,
-      canEdit: true,
-      debouncedSaveLibrary: vi.fn(),
-      location: { pathname: "/editor/drawing", hash: "", search: "" },
-      navigate: vi.fn(),
-      refs: {
-        ...h.refs,
-        elementVersionMap: ref(new Map()),
-        initialSceneElements: ref([]),
-        lastSyncedElementOrder: ref(null),
-        hasSceneChangesSinceLoad: ref(false),
-        isBootstrappingScene: ref(true),
-        hasHydratedInitialScene: ref(false),
-      },
-      setAccessLevel: vi.fn(),
-      setDrawingName: vi.fn(),
-      setIsReady: vi.fn(),
-      setIsSceneLoading: vi.fn(),
-      setLoadError: vi.fn(),
-      recordElementVersion: vi.fn(),
-      normalizeImageElementStatus: (elements = []) => elements,
-      setInitialData: (scene) => {
-        if (!scene) return;
-        const restored = restoreAppState(scene.appState, null);
-        h.editor.getAppState = () => restored;
-        h.refs.excalidrawAPI.current = h.editor;
-      },
-    };
+    const loader = makeLoader(h);
     vi.mocked(api.getDrawing).mockResolvedValueOnce({
       version: 1,
       accessLevel: "owner",

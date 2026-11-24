@@ -40,6 +40,7 @@ privado de Sites; no se atribuye esa identidad de prueba al usuario real.
 La sincronización HTTP tiene latencia aproximada de 1 segundo, recuperación de
 escena persistida cada 5 segundos y no equivale a Socket.IO a 60 fps. Solo se prueba
 la cuenta personal en varias sesiones; no se afirma colaboración pública multiusuario.
+Los ajustes del lienzo de otras sesiones se aplican al recargar o resolver un conflicto de guardado, no en tiempo real.
 El historial se conserva hasta borrar permanentemente el dibujo. Los respaldos
 compatibles con upstream contienen el estado actual, no todo el historial.
 

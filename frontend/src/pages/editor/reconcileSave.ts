@@ -64,7 +64,7 @@ export const reloadAndReconcile = async (
   };
   const localAppState =
     editor?.getAppState?.() ?? refs.latestAppState.current ?? sampledAppState ?? {};
-  // A saved-scene event may have advanced the base while the read was pending.
+  // A local preview acknowledgement may have advanced the version during the read.
   const acceptsRemote = remote.version >= (refs.currentDrawingVersion.current ?? 0);
   const { nextBase, patch } = mergePersistedAppState(
     refs.lastAcceptedAppState.current,

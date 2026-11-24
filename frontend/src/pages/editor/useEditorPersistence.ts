@@ -183,8 +183,8 @@ export const useEditorPersistence = ({
       // Queued arguments may predate a previous conflict merge. Sample the live
       // scene when the queued save starts, including its deletion tombstones.
       const liveElements = editor?.getSceneElementsIncludingDeleted?.();
-      // Pair the sampled scene with the version it is based on. A peer's
-      // saved-scene broadcast may advance the tracked version meanwhile.
+      // Pair the sampled scene with its save version before async compression.
+      // A version-guarded preview write may be acknowledged in the meantime.
       const sampledVersion = refs.currentDrawingVersion.current;
       const candidateElements = Array.isArray(liveElements)
         ? liveElements
