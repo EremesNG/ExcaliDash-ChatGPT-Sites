@@ -7,15 +7,15 @@
   "updateMode": "manual-reviewed",
   "editor": {
     "package": "@excalidraw/excalidraw",
-    "version": "0.18.0-3c916c5",
+    "version": "0.18.0-9c2e462",
     "repository": "https://github.com/excalidraw/excalidraw",
     "branch": "release",
     "channel": "next",
-    "commit": "3c916c58bd219157a3486960f865174468f86eff",
-    "releasedAt": "2026-11-04T19:55:10Z",
-    "productionVersion": "2026-11-04T19:55:10Z-3c916c5",
+    "commit": "9c2e462ec23e54c4cf0493328840d6a27191c674",
+    "releasedAt": "2026-11-21T18:23:03Z",
+    "productionVersion": "2026-11-21T18:23:03Z-9c2e462",
     "productionVersionUrl": "https://excalidraw.com/version.json",
-    "integrity": "sha512-RYMD7G2vbTMzIE8RmKGRrghdD+h6p1jd7R0pQZzw1NPOzFosg73SMW8JDFVPMC/weWByBqGNOtmp+v+YEDilMA==",
+    "integrity": "sha512-xumH4TBrpAAbLPlb75Qyv9SaQYF48X2OT6lFppsL99cC3f9np4fd7X96M3BpzM0b9PIeMGl3gBLj/Iv4zhMzTw==",
     "updateMode": "manual-reviewed"
   }
 }

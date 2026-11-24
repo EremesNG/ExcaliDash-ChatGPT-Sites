@@ -103,23 +103,23 @@ try{
    await check(requestFor(instance));
   }finally{await instance.dispose()}
  };
- const pinned={package:'@excalidraw/excalidraw',version:'0.18.0-3c916c5',commit:'3c916c58bd219157a3486960f865174468f86eff',shortCommit:'3c916c5',releasedAt:'2026-11-04T19:55:10Z'};
+ const pinned={package:'@excalidraw/excalidraw',version:'0.18.0-9c2e462',commit:'9c2e462ec23e54c4cf0493328840d6a27191c674',shortCommit:'9c2e462',releasedAt:'2026-11-21T18:23:03Z'};
  const sourceUrl='https://excalidraw.com/version.json';
- await editorScenario(()=>Response.json({version:'2026-11-04T19:55:10Z-3c916c5'}),async(request)=>{
+ await editorScenario(()=>Response.json({version:'2026-11-21T18:23:03Z-9c2e462'}),async(request)=>{
   const before=Date.now();
   const {r,data}=await request('/system/editor');
   assert.equal(r.status,200);
   assert.equal(r.headers.get('cache-control'),'no-store');
-  assert.deepEqual(data,{pinned,upstream:{version:'2026-11-04T19:55:10Z-3c916c5',shortCommit:'3c916c5',releasedAt:'2026-11-04T19:55:10Z'},status:'match',checkedAt:data.checkedAt,sourceUrl});
+  assert.deepEqual(data,{pinned,upstream:{version:'2026-11-21T18:23:03Z-9c2e462',shortCommit:'9c2e462',releasedAt:'2026-11-21T18:23:03Z'},status:'match',checkedAt:data.checkedAt,sourceUrl});
   assert.equal(new Date(data.checkedAt).toISOString(),data.checkedAt);
   assert.ok(Date.parse(data.checkedAt)>=before&&Date.parse(data.checkedAt)<=Date.now());
  });ok('editor status reports the pinned build and a matching production build');
  for(const [version,status,shortCommit,releasedAt] of [
-  ['2026-11-05T00:00:00Z-3C916C58BD219157A3486960F865174468F86EFF','match','3c916c5','2026-11-05T00:00:00Z'],
-  ['2026-11-05T00:00:00Z-a1b2c3d','newer','a1b2c3d','2026-11-05T00:00:00Z'],
-  ['2026-11-04T19:55:11+00:00-a1b2c3d','newer','a1b2c3d','2026-11-04T19:55:11+00:00'],
-  ['2026-11-03T00:00:00Z-a1b2c3d','different','a1b2c3d','2026-11-03T00:00:00Z'],
-  ['2026-11-04T19:55:10Z-a1b2c3d','different','a1b2c3d','2026-11-04T19:55:10Z'],
+  ['2026-11-22T00:00:00Z-9C2E462EC23E54C4CF0493328840D6A27191C674','match','9c2e462','2026-11-22T00:00:00Z'],
+  ['2026-11-22T00:00:00Z-a1b2c3d','newer','a1b2c3d','2026-11-22T00:00:00Z'],
+  ['2026-11-21T18:23:04+00:00-a1b2c3d','newer','a1b2c3d','2026-11-21T18:23:04+00:00'],
+  ['2026-11-20T00:00:00Z-a1b2c3d','different','a1b2c3d','2026-11-20T00:00:00Z'],
+  ['2026-11-21T18:23:03Z-a1b2c3d','different','a1b2c3d','2026-11-21T18:23:03Z'],
  ]){
   await editorScenario(()=>Response.json({version}),async(request)=>{
    const {r,data}=await request('/system/editor');
@@ -136,21 +136,21 @@ try{
   assert.equal(new Date(data.checkedAt).toISOString(),data.checkedAt);
  };
  for(const outbound of [
-  ()=>Response.json({version:'2026-11-04T19:55:10Z-3c916c5'},{status:503}),
+  ()=>Response.json({version:'2026-11-21T18:23:03Z-9c2e462'},{status:503}),
   ()=>{throw new Error('Simulated upstream network failure')},
   ()=>new Response('not JSON'),
   ()=>Response.json({}),
-  ()=>Response.json({version:'not-a-date-3c916c5'}),
-  ()=>Response.json({version:'2026-13-27T16:39:50Z-3c916c5'}),
-  ()=>Response.json({version:'2026-11-04T19:55:10Z-3c916c'}),
-  ()=>Response.json({version:'2026-11-04T19:55:10Z-'+'a'.repeat(41)}),
-  ()=>Response.json({version:'2026-11-04T19:55:10Z-nothex7'}),
+  ()=>Response.json({version:'not-a-date-9c2e462'}),
+  ()=>Response.json({version:'2026-13-21T18:23:03Z-9c2e462'}),
+  ()=>Response.json({version:'2026-11-21T18:23:03Z-9c2e46'}),
+  ()=>Response.json({version:'2026-11-21T18:23:03Z-'+'a'.repeat(41)}),
+  ()=>Response.json({version:'2026-11-21T18:23:03Z-nothex7'}),
   ()=>Response.json({version:123}),
  ])await editorScenario(outbound,async(request)=>unavailable(await request('/system/editor')));
  ok('editor upstream HTTP, network and parse failures degrade to unavailable');
  let delayed;
  try{
-  await editorScenario(async()=>{delayed=delay(5000);await delayed;return Response.json({version:'2026-11-04T19:55:10Z-3c916c5'})},async(request)=>{
+  await editorScenario(async()=>{delayed=delay(5000);await delayed;return Response.json({version:'2026-11-21T18:23:03Z-9c2e462'})},async(request)=>{
    const started=performance.now();
    unavailable(await request('/system/editor'));
    assert.ok(performance.now()-started<4500,'editor timeout must respond before the delayed upstream');
@@ -166,7 +166,7 @@ try{
    assert.equal(outbound.headers.get('accept'),'application/json');
    for(const name of ['cookie','authorization','oai-authenticated-user-id','oai-authenticated-user-email','oai-authenticated-user-full-name'])assert.equal(outbound.headers.has(name),false,name);
    assert.equal(await outbound.text(),'');
-   return Response.json({version:'2026-11-04T19:55:10Z-3c916c5'},{status:succeeds?200:503});
+   return Response.json({version:'2026-11-21T18:23:03Z-9c2e462'},{status:succeeds?200:503});
   },async(request)=>{
    const first=await request('/system/editor','GET',undefined,'alice',{cookie:'session=private',authorization:'Bearer private'});
    const second=await request('/system/editor','GET',undefined,'bob');
@@ -177,7 +177,7 @@ try{
   });
  }ok('editor checks cache success and failure across users without sending private request data');
  let authorizedCalls=0;
- await editorScenario(()=>{authorizedCalls++;return Response.json({version:'2026-11-04T19:55:10Z-3c916c5'})},async(request)=>{
+ await editorScenario(()=>{authorizedCalls++;return Response.json({version:'2026-11-21T18:23:03Z-9c2e462'})},async(request)=>{
   apiError(await request('/system/editor','GET',undefined,null),'AUTH_REQUIRED');
   apiError(await request('/system/editor','POST',{},'alice',{origin:'http://evil.test'}),'CSRF_ORIGIN_REJECTED');
   for(const method of ['POST','PUT','DELETE','OPTIONS'])apiError(await request('/system/editor',method),'METHOD_NOT_ALLOWED');

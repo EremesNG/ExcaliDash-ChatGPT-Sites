@@ -68,7 +68,7 @@ and frontend React/Tailwind versions.
 ## Excalidraw editor
 
 Pin exact published versions only, never ranges or moving dist-tags. The current
-pin is `@excalidraw/excalidraw@0.18.0-3c916c5`, independent of ExcaliDash 0.6.7.
+pin is `@excalidraw/excalidraw@0.18.0-9c2e462`, independent of ExcaliDash 0.7.0.
 Provenance lives in the `editor` block of `upstream.json`; follow the
 [editor update procedure](docs/UPDATES.md#actualizar-el-editor-excalidraw), including
 backup-before-publish and the lossy rollback caveat. Keep editor bumps separate.

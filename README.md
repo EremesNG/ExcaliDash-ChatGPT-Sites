@@ -9,7 +9,7 @@ and R2 scene and image storage. This fork is independently maintained.
 | Component | Current baseline |
 | --- | --- |
 | ExcaliDash | [0.7.0](docs/upstream-release-0.7.0.md) (`b692be20aea76519c19e9874d95163887066f036`) |
-| Excalidraw editor | `0.18.0-3c916c5`, excalidraw.com `release` build `3c916c5` (2026-11-04); pinned independently of ExcaliDash 0.7.0's `^0.18.1` |
+| Excalidraw editor | `0.18.0-9c2e462`, excalidraw.com `release` build `9c2e462` (2026-11-21); pinned independently of ExcaliDash 0.7.0's `^0.18.1` |
 | Sites runtime | Vinext build integration and Cloudflare Worker |
 
 The pinned editor includes sticky notes, Bucket Fill and lasso selection.

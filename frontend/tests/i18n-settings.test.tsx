@@ -83,10 +83,10 @@ const advancedProps = {
   setImportError: vi.fn(), setImportSuccess: vi.fn(),
 };
 const editorStatus = (patch: Partial<EditorStatus> = {}): EditorStatus => ({
-  pinned: { package: "@excalidraw/excalidraw", version: "0.18.0-3c916c5", commit: "3c916c58bd219157a3486960f865174468f86eff",
-    shortCommit: "3c916c5", releasedAt: "2026-11-04T19:55:10Z" },
-  upstream: { version: "0.18.0-3c916c5", shortCommit: "3c916c5", releasedAt: "2026-11-04T19:55:10Z" },
-  status: "match", checkedAt: "2026-11-07T08:00:00Z", sourceUrl: "https://excalidraw.com/version.json",
+  pinned: { package: "@excalidraw/excalidraw", version: "0.18.0-9c2e462", commit: "9c2e462ec23e54c4cf0493328840d6a27191c674",
+    shortCommit: "9c2e462", releasedAt: "2026-11-21T18:23:03Z" },
+  upstream: { version: "0.18.0-9c2e462", shortCommit: "9c2e462", releasedAt: "2026-11-21T18:23:03Z" },
+  status: "match", checkedAt: "2026-11-24T08:00:00Z", sourceUrl: "https://excalidraw.com/version.json",
   ...patch,
 });
 const openAdvanced = async () => {
@@ -107,9 +107,9 @@ describe("Advanced Settings in Spanish", () => {
   });
 
   it.each([
-    ["match", "Misma compilación que excalidraw.com", "4 nov 2026"],
-    ["newer", "excalidraw.com usa una compilación más reciente", "5 nov 2026"],
-    ["different", "excalidraw.com usa una compilación diferente", "3 nov 2026"],
+    ["match", "Misma compilación que excalidraw.com", "21 nov 2026"],
+    ["newer", "excalidraw.com usa una compilación más reciente", "22 nov 2026"],
+    ["different", "excalidraw.com usa una compilación diferente", "20 nov 2026"],
     ["unavailable", "No se pudo comprobar excalidraw.com · versión fijada", ""],
   ] as const)("translates the %s editor status and UTC release date", async (status, message, date) => {
     state.editor.mockResolvedValue(editorStatus({
@@ -117,7 +117,7 @@ describe("Advanced Settings in Spanish", () => {
       ...(status === "unavailable" ? { upstream: null } : {}),
       ...(status === "newer" || status === "different" ? {
         upstream: { version: "0.18.0-a1b2c3d", shortCommit: "a1b2c3d",
-          releasedAt: status === "newer" ? "2026-11-05T00:30:00.000Z" : "2026-11-03T00:30:00.000Z" },
+          releasedAt: status === "newer" ? "2026-11-22T00:30:00.000Z" : "2026-11-20T00:30:00.000Z" },
       } : {}),
     }));
     await openAdvanced();

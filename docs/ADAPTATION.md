@@ -95,9 +95,9 @@ de producto.
 
 ## Editor Excalidraw
 
-El editor se fija exactamente a `@excalidraw/excalidraw@0.18.0-3c916c5`, build de
-excalidraw.com del 4 de noviembre de 2026, commit
-`3c916c58bd219157a3486960f865174468f86eff` de la rama `release`, canal npm `next`.
+El editor se fija exactamente a `@excalidraw/excalidraw@0.18.0-9c2e462`, build de
+excalidraw.com del 21 de noviembre de 2026, commit
+`9c2e462ec23e54c4cf0493328840d6a27191c674` de la rama `release`, canal npm `next`.
 Este pin es independiente del rango `^0.18.1` de ExcaliDash 0.7.0. Incluye notas
 adhesivas, Bucket Fill y selección con lazo; React permanece en 18.3.1. El conversor
 Mermaid pasa a 3.6.0 como dependencia del editor.
