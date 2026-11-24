@@ -60,6 +60,7 @@ function checkConsistency(root) {
       const installed = lock?.packages?.[lockPath];
       if (typeof editor.version === 'string' && editor.version.trim()) {
         checkValue(`frontend/package.json dependencies[${editor.package}]`, manifest?.dependencies?.[editor.package], editor.version);
+        checkValue(`frontend/package-lock.json packages[''].dependencies[${editor.package}]`, lock?.packages?.['']?.dependencies?.[editor.package], editor.version);
         checkValue(`frontend/package-lock.json packages[${lockPath}].version`, installed?.version, editor.version);
       }
       if (typeof editor.integrity === 'string' && editor.integrity.trim()) {

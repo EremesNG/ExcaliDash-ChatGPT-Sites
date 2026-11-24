@@ -9,6 +9,23 @@ import { fileURLToPath } from 'node:url';
 const repo = new URL('../', import.meta.url);
 const checker = fileURLToPath(new URL('scripts/check-editor-upstream.mjs', repo));
 
+function copyFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'editor-upstream-check-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'frontend'));
+  for (const file of ['upstream.json', 'frontend/package.json', 'frontend/package-lock.json']) {
+    copyFileSync(new URL(file, repo), join(root, file));
+  }
+  return root;
+}
+
+function assertOfflineRejection(root, diagnostic) {
+  const result = spawnSync(process.execPath, [checker, '--offline', '--root', root], { encoding: 'utf8' });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.match(result.stderr, diagnostic);
+}
+
 for (const { name, field, mutate } of [
   {
     name: 'the pin has no commit suffix',
@@ -45,12 +62,7 @@ for (const { name, field, mutate } of [
   },
 ]) {
   test(`offline checker rejects inconsistent provenance when ${name}`, (t) => {
-    const root = mkdtempSync(join(tmpdir(), 'editor-upstream-check-'));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
-    mkdirSync(join(root, 'frontend'));
-    for (const file of ['upstream.json', 'frontend/package.json', 'frontend/package-lock.json']) {
-      copyFileSync(new URL(file, repo), join(root, file));
-    }
+    const root = copyFixture(t);
 
     const upstreamPath = join(root, 'upstream.json');
     const upstream = JSON.parse(readFileSync(upstreamPath, 'utf8'));
@@ -65,14 +77,23 @@ for (const { name, field, mutate } of [
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
       const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
       manifest.dependencies[editor.package] = editor.version;
+      lock.packages[''].dependencies[editor.package] = editor.version;
       lock.packages[`node_modules/${editor.package}`].version = editor.version;
       writeFileSync(manifestPath, JSON.stringify(manifest));
       writeFileSync(lockPath, JSON.stringify(lock));
     }
 
-    const result = spawnSync(process.execPath, [checker, '--offline', '--root', root], { encoding: 'utf8' });
-    assert.ifError(result.error);
-    assert.equal(result.status, 1, result.stderr || result.stdout);
-    assert.match(result.stderr, new RegExp(`upstream\\.json: editor\\.${field}\\b`));
+    assertOfflineRejection(root, new RegExp(`upstream\\.json: editor\\.${field}\\b`));
   });
 }
+
+test('offline checker rejects a mismatched lockfile root dependency requirement', (t) => {
+  const root = copyFixture(t);
+  const { editor } = JSON.parse(readFileSync(join(root, 'upstream.json'), 'utf8'));
+  const lockPath = join(root, 'frontend/package-lock.json');
+  const lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+  lock.packages[''].dependencies[editor.package] = editor.version.replace(/-[a-f0-9]+$/i, '-0000000');
+  writeFileSync(lockPath, JSON.stringify(lock));
+
+  assertOfflineRejection(root, /frontend\/package-lock\.json packages\[''\]\.dependencies\[/);
+});
